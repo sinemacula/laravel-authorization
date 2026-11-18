@@ -14,15 +14,21 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
 use Tests\Fixtures\BulkChecks\UnreadableTenantPost;
 use Tests\Fixtures\QueryRecorder;
+use Tests\Fixtures\QueryScoping\IntegerTypedPost;
 use Tests\Fixtures\QueryScoping\RecordedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
@@ -44,6 +50,8 @@ use Tests\TestCase;
 #[CoversClass(DeclaredResourceTenant::class)]
 final class DeclaredResourceTenantTest extends TestCase
 {
+    use ScopesQueries;
+
     /**
      * A declared model's tenant is read from its declaration, raw, without
      * asking the configured resolver; any other model's is the configured
@@ -68,8 +76,9 @@ final class DeclaredResourceTenantTest extends TestCase
      * A pair naming a declared model, by its class or through the morph map, is
      * answered from its record's tenant columns: none for a tenantless model,
      * the record's tenant, or false for a record that does not exist or a key
-     * that is not an integer for an integer-keyed model. A pair naming any
-     * other type is the configured resolver's.
+     * that is not an integer's canonical text within 64 bits for an
+     * integer-keyed model, tenantless or not. A pair naming any other type is
+     * the configured resolver's.
      *
      * @return void
      */
@@ -86,11 +95,55 @@ final class DeclaredResourceTenantTest extends TestCase
         self::assertEquals(new Reference('teams', '9'), $resolver->tenantOfRecord('tickets', (string) $ticket->getKey())); // @phpstan-ignore cast.string
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '999'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, 'abc'));
+        self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '0' . $ticket->getKey())); // @phpstan-ignore binaryOp.invalid
+        self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '-0'));
+        self::assertFalse($resolver->tenantOfRecord(ScopedPost::class, '01'));
+        self::assertNull($resolver->tenantOfRecord(ScopedPost::class, '0'));
+        self::assertNull($resolver->tenantOfRecord(ScopedPost::class, '-1'));
+        self::assertNull($resolver->tenantOfRecord(ScopedPost::class, (string) \PHP_INT_MIN));
+        self::assertFalse($resolver->tenantOfRecord(ScopedPost::class, '9223372036854775808'));
+        self::assertFalse($resolver->tenantOfRecord(IntegerTypedPost::class, '07'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 19)));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 11)));
         self::assertFalse($resolver->tenantOfRecord('posts', '1'));
         self::assertFalse($resolver->tenantOfRecord(StubGrantee::class, 'u1'));
         self::assertSame([['posts', '1'], [StubGrantee::class, 'u1']], $fallback->askedRecords);
+    }
+
+    /**
+     * An integer key spelt other than as its canonical text names no record, as
+     * the query scope compares keys, so `check()`, `checkMany()` and
+     * `canEach()` deny it as `resource_unresolved` rather than decide record 7
+     * past its own deny.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANonCanonicalIntegerKeyNamesNoRecord(): void
+    {
+        $user = StubGrantee::create(['id' => 'u1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        TenantScopedPost::query()->create(['id' => 7]);
+        TenantScopedPost::query()->create(['id' => 8]);
+
+        foreach ([TenantScopedPost::class, ScopedPost::class] as $class) {
+            self::attachToResource([$class, '7'], [['effect' => 'deny', 'actions' => ['posts:view']]]);
+        }
+
+        $manager = $this->resolveRequest($user);
+        $pairs   = ['seven' => [TenantScopedPost::class, '7'], 'padded' => [TenantScopedPost::class, '07'], 'tenantless' => [ScopedPost::class, '07']];
+        $checks  = \array_map(static fn (array $pair): CheckInput => new CheckInput('posts:view', $pair), $pairs);
+        $reason  = static fn (array $pair): ?DecisionReason => $manager->check('posts:view', $pair)->reason;
+        $denied  = ['seven' => DecisionReason::EXPLICIT_DENY, 'padded' => DecisionReason::RESOURCE_UNRESOLVED, 'tenantless' => DecisionReason::RESOURCE_UNRESOLVED];
+
+        self::assertSame($denied, \array_map($reason, $pairs));
+        self::assertSame($denied, \array_map(static fn (Decision $decision): ?DecisionReason => $decision->reason, $manager->checkMany($checks)));
+        $allowed = $manager->canEach('posts:view', [...$pairs, 'eight' => [TenantScopedPost::class, '8']]);
+
+        self::assertSame(['seven' => false, 'padded' => false, 'tenantless' => false, 'eight' => true], $allowed);
+        self::assertSame([8], TenantScopedPost::query()->whereAuthorized('posts:view', [], $manager)->pluck('id')->all()); // @phpstan-ignore method.notFound
     }
 
     /**
@@ -258,10 +311,11 @@ final class DeclaredResourceTenantTest extends TestCase
 
     /**
      * Many records of a declared type are looked up in one query on the write
-     * connection, each answered as on its own: its tenant, false for a key the
-     * column cannot hold or an integer key no record has, every one none for a
-     * tenantless type; a string key not found under exactly its spelling is
-     * left out, to be looked up on its own.
+     * connection, each answered as on its own: its tenant, false for a key that
+     * names no record, one the column cannot hold or an integer key no record
+     * has, every key that names a record none for a tenantless type; a key that
+     * names no record is never looked up, and a string key not found under
+     * exactly its spelling is left out, to be looked up on its own.
      *
      * @return void
      */
@@ -281,7 +335,7 @@ final class DeclaredResourceTenantTest extends TestCase
 
         self::assertCount(1, $lookups);
         self::assertTrue($lookups[0]->useWritePdo);
-        $expected = ['a' => new Reference('teams', '5'), 'b' => new Reference('teams', '6'), 'c' => new Reference('teams', '5'), 'd' => false, 'e' => false, 'f' => false];
+        $expected = ['a' => new Reference('teams', '5'), 'b' => new Reference('teams', '6'), 'c' => false, 'd' => false, 'e' => false, 'f' => false];
 
         self::assertEquals($expected, $tenants);
         self::assertSame(\array_keys($ids), \array_keys($tenants));
@@ -290,8 +344,12 @@ final class DeclaredResourceTenantTest extends TestCase
             self::assertEquals($resolver->tenantOfRecord(RecordedTenantPost::class, $id), $tenants[$key]);
         }
 
-        self::assertSame(['x' => null, 'y' => null], $resolver->tenantsOfRecords(ScopedPost::class, ['x' => '1', 'y' => '2']));
-        self::assertSame(['e' => false], $resolver->tenantsOfRecords(RecordedTenantPost::class, ['e' => 'abc']));
+        self::assertSame(['x' => null, 'y' => null, 'z' => false], $resolver->tenantsOfRecords(ScopedPost::class, ['x' => '1', 'y' => '2', 'z' => '02']));
+
+        QueryRecorder::reset();
+
+        self::assertSame(['c' => false, 'e' => false], $resolver->tenantsOfRecords(RecordedTenantPost::class, ['c' => '0' . $first, 'e' => 'abc']));
+        self::assertSame([], QueryRecorder::recorded());
 
         TenantScopedDocument::query()->create(['code' => 'doc-a', 'tenant_type' => 'teams', 'tenant_id' => 't1']);
 

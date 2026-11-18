@@ -28,11 +28,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
  * scope, on the write connection, so a record just moved to another tenant is
  * read as it is now, not as a replica last saw it. A pair naming a record that
  * does not exist cannot be told, so the check denies it as
- * `resource_unresolved`; so does a pair whose key the key column could not
- * hold, which is never looked up: a key that is not an integer for an
- * integer-keyed model, and, on PostgreSQL, which raises an error for it (and
- * aborts the transaction around the query), a key that is not an integer the
- * column's integer type holds, not a uuid for a uuid column, or not UTF-8.
+ * `resource_unresolved`; so does a pair whose key names no record or the key
+ * column could not hold, which is never looked up: for an integer-keyed model,
+ * tenantless or not, a key that is not an integer's canonical text within 64
+ * bits, since the query scope compares keys so (`07` and `-0` name no record),
+ * and, on PostgreSQL, which raises an error for it (and aborts the transaction
+ * around the query), a key that is not an integer the column's integer type
+ * holds, not a uuid for a uuid column, or not UTF-8.
  *
  * It answers many resources at once for a bulk check (see
  * `BulkResourceTenantResolver`): the declared models from their declarations,
@@ -79,9 +81,9 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
 
     /**
      * Return the tenant that owns the record a `(type, id)` pair names: for a
-     * declared model, none when it is tenantless, else the looked-up record's,
-     * or false when there is no such record; for any other, as the configured
-     * resolver answers.
+     * declared model, false for a key that names no record, none when it is
+     * tenantless, else the looked-up record's, or false when there is no such
+     * record; for any other, as the configured resolver answers.
      *
      * @param  string  $type
      * @param  string  $id
@@ -99,9 +101,14 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
             return $this->fallback->tenantOfRecord($type, $id);
         }
 
+        $model   = new $class;
         $tenancy = $class::resourceTenancy();
 
-        return $tenancy->isTenantless() ? null : self::recordTenant(new $class, $tenancy, $id);
+        if (!self::namesRecord($model, $id)) {
+            return false;
+        }
+
+        return $tenancy->isTenantless() ? null : self::recordTenant($model, $tenancy, $id);
     }
 
     /**
@@ -138,10 +145,11 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
 
     /**
      * Return the tenant that owns each record of the type, keyed as the ids
-     * are: for a declared model, none when it is tenantless, else each record's
-     * found by one query, or false for a key the key column could not hold; for
-     * any other, as the configured resolver answers in bulk, or nothing when it
-     * does not, so each is asked on its own.
+     * are: for a declared model, false for a key that names no record, none
+     * when it is tenantless, else each record's found by one query, or false
+     * for a key the key column could not hold; for any other, as the configured
+     * resolver answers in bulk, or nothing when it does not, so each is asked
+     * on its own.
      *
      * @param  string  $type
      * @param  array<array-key, string>  $ids
@@ -156,19 +164,24 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
             return $this->fallback instanceof BulkResourceTenantResolver ? $this->fallback->tenantsOfRecords($type, $ids) : [];
         }
 
+        $model   = new $class;
         $tenancy = $class::resourceTenancy();
 
-        return $tenancy->isTenantless() ? \array_map(static fn (): null => null, $ids) : self::recordTenants(new $class, $tenancy, $ids);
+        if (!$tenancy->isTenantless()) {
+            return self::recordTenants($model, $tenancy, $ids);
+        }
+
+        return \array_map(static fn (string $id): ?bool => self::namesRecord($model, $id) ? null : false, $ids);
     }
 
     /**
      * Return the tenant of the declared model's record of each key, read from
      * its tenant columns on the write connection in one query: false for a key
-     * the key column could not hold, which is never looked up, or for an
-     * integer key no record has, since an integer compares exactly as the
-     * database compares it; a string key the query does not find under exactly
-     * its spelling, which a database comparing keys loosely may still find, and
-     * a record whose tenant cannot be read, are left out.
+     * that names no record or the key column could not hold, which is never
+     * looked up, or for an integer key no record has, since an integer compares
+     * exactly as the database compares it; a string key the query does not find
+     * under exactly its spelling, which a database comparing keys loosely may
+     * still find, and a record whose tenant cannot be read, are left out.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceTenancy  $tenancy
@@ -178,9 +191,9 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
     private static function recordTenants(Model $model, ResourceTenancy $tenancy, array $ids): array
     {
         $isInteger = $model->getKeyType() === 'int';
-        $keys      = \array_filter($ids, static fn (string $id): bool => (!$isInteger || \preg_match('/\A-?\d{1,18}\z/', $id) === 1) && self::isComparableKey($model, $id));
+        $keys      = \array_filter($ids, static fn (string $id): bool => self::namesRecord($model, $id) && self::isComparableKey($model, $id));
         $records   = self::recordsByKey($model, $tenancy, $keys);
-        $found     = \array_map(static fn (string $id): ?Model => $records[$isInteger ? (string) (int) $id : $id] ?? null, $keys);
+        $found     = \array_map(static fn (string $id): ?Model => $records[$id] ?? null, $keys);
         $tenants   = [];
 
         foreach ($ids as $index => $id) {
@@ -267,10 +280,22 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
      */
     private static function recordTenant(Model $model, ResourceTenancy $tenancy, string $id): false|Reference|null
     {
-        $isKey  = ($model->getKeyType() !== 'int' || \preg_match('/\A-?\d{1,18}\z/', $id) === 1) && self::isComparableKey($model, $id);
-        $record = $isKey ? $model->newQueryWithoutScopes()->useWritePdo()->whereKey($id)->first($tenancy->columnNames()) : null;
+        $record = self::isComparableKey($model, $id) ? $model->newQueryWithoutScopes()->useWritePdo()->whereKey($id)->first($tenancy->columnNames()) : null;
 
         return $record === null ? false : $tenancy->tenantOf($record);
+    }
+
+    /**
+     * Determine whether the key can name one of the model's records: an integer
+     * key only as an integer's canonical text within 64 bits.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @param  string  $id
+     * @return bool
+     */
+    private static function namesRecord(Model $model, string $id): bool
+    {
+        return !\in_array($model->getKeyType(), ['int', 'integer'], true) || (string) (int) $id === $id;
     }
 
     /**
