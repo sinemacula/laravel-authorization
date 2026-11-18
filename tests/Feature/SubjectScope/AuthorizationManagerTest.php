@@ -238,16 +238,17 @@ final class AuthorizationManagerTest extends TestCase
 
         $this->resolveRequest($member, $this->second, 'web');
 
-        foreach ([$this->first, $this->second, null] as $index => $tenant) {
+        foreach ([$this->first, $this->first, $this->second, null] as $index => $tenant) {
             TenantScopedPost::query()->create(['title' => 'p' . $index, 'tenant_type' => $tenant?->getMorphClass(), 'tenant_id' => $tenant?->getKey()]);
         }
 
         $query = TenantScopedPost::query()->whereAuthorized(self::CREATE, [], Authorization::for($this->subject($this->first)))->orderBy('id'); // @phpstan-ignore method.notFound
 
-        self::assertSame(['p0', 'p2'], $query->pluck('title')->all());
-        self::assertSame(2, $query->count());
+        self::assertSame(['p0', 'p1', 'p3'], $query->pluck('title')->all());
+        self::assertSame(3, $query->count());
+        self::assertSame(['p0', 'p1', 'p3'], $query->pluck('title')->all());
         self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
-        self::assertSame(['p1', 'p2'], TenantScopedPost::query()->whereAuthorized(self::CREATE)->orderBy('id')->pluck('title')->all()); // @phpstan-ignore method.notFound
+        self::assertSame(['p2', 'p3'], TenantScopedPost::query()->whereAuthorized(self::CREATE)->orderBy('id')->pluck('title')->all()); // @phpstan-ignore method.notFound
     }
 
     /**

@@ -926,11 +926,12 @@ final class QueryAuthorizerTest extends TestCase
 
         $user->attachPolicy(self::storedPolicy('marked', [
             ['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['subject.department' => 'sales']]],
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['subject.department' => 'marketing']]],
             ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['plan.tier' => 'pro']]],
             ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => ['eq' => ['plan.tier' => 'free']]],
         ]));
 
-        foreach (['posts:view' => [1, 2], 'posts:edit' => [1, 2], 'posts:delete' => []] as $action => $expected) {
+        foreach (['posts:view' => [1, 2], 'posts:create' => [], 'posts:edit' => [1, 2], 'posts:delete' => []] as $action => $expected) {
             self::assertSame($expected, self::checked($manager, $action, [1, 2]), $action);
             self::assertSame($expected, self::kept($manager, $action), $action);
         }

@@ -306,7 +306,7 @@ final class ParityScenario
 
         // The model-level scope decides about the principal, which a machine's
         // identity grants nothing to.
-        $this->isOutsideOnUser = !($this->isModelScoped() && $this->principal instanceof StubMachine) && $this->pick([true, false]);
+        $this->isOutsideOnUser = $this->principal === $this->user || (!($this->isModelScoped() && $this->principal instanceof StubMachine) && $this->pick([true, false]));
         $this->log[]           = "outside construct {$construct} on the " . ($this->isOutsideOnUser ? 'user' : 'principal');
 
         if ($construct === 'unmarked-source') {

@@ -95,10 +95,13 @@ final class AuthorizedScopeTest extends TestCase
         $user->givePermission(Permission::create(['name' => GuardedPost::ACTION]));
         $user->attachPolicy(self::storedPolicy('not-two', [['effect' => 'deny', 'actions' => [GuardedPost::ACTION], 'resources' => [(new GuardedPost)->getMorphClass() . ':2']]]));
 
-        $ids = static fn (PostOwner $owner): array => $owner->guardedPosts->sortBy('id')->pluck('id')->values()->all();
+        $ids   = static fn (PostOwner $owner): array => $owner->guardedPosts->sortBy('id')->pluck('id')->values()->all();
+        $eager = PostOwner::query()->with('guardedPosts')->firstOrFail();
 
         self::assertSame([1, 3], $ids($owner));
-        self::assertSame([1, 3], $ids(PostOwner::query()->with('guardedPosts')->firstOrFail()));
+        self::assertTrue($eager->relationLoaded('guardedPosts'));
+        self::assertSame([1, 3], $ids($eager));
+
         $holding = static fn (int $id): int => PostOwner::query()->whereHas('guardedPosts', static fn (Builder $posts): Builder => $posts->whereKey($id))->count();
 
         self::assertSame([1, 0], [$holding(1), $holding(2)]);
