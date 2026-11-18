@@ -507,6 +507,7 @@ final class AuthorizeActionTest extends TestCase
         $this->actingAsSubject(new Subject($identity, $identity, $tenantA));
 
         $this->getJson('/tenant-posts/1')->assertOk();
+        $this->getJson('/tenant-posts/2')->assertForbidden();
 
         $this->withoutExceptionHandling();
 

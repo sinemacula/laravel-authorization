@@ -8,10 +8,12 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -145,15 +147,18 @@ final class MiddlewareBudgetTest extends TestCase
      */
     public function testAuthorizeActionAdmitOnABoundModelStaysWithinItsQueryBudget(): void
     {
+        config(['authorization.events.decisions.allows' => 'all']);
+        Event::fake([DecisionEvaluated::class]);
+
         $tenant = StubTenant::create(['id' => 'tenant-a']);
         $user   = StubGrantee::create(['id' => (string) Str::uuid()]);
-        $post   = TenantScopedPost::query()->create(['tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        $post   = TenantScopedPost::query()->create(['id' => 1, 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
         $this->actAs($user, $tenant);
 
-        $route   = (new Route(['GET'], '/posts/{post}', static fn (): string => 'ok'))->bind(Request::create('/posts/1', 'GET'));
         $request = Request::create('/posts/1', 'GET');
+        $route   = (new Route(['GET'], '/posts/{post}', static fn (): string => 'ok'))->bind($request);
 
         $route->setParameter('post', $post);
         $request->setRouteResolver(static fn (): Route => $route);
@@ -169,6 +174,7 @@ final class MiddlewareBudgetTest extends TestCase
         self::assertInstanceOf(Response::class, $response);
         self::assertSame('ok', $response->getContent());
         self::assertLessThanOrEqual(6, $queries, 'AuthorizeAction exceeded its six-query budget for one request.');
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === $post->getMorphClass() . ':1');
     }
 
     /**

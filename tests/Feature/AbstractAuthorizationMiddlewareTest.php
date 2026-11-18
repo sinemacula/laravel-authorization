@@ -118,8 +118,8 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
 
     /**
      * Behind `auth:` on another guard, every middleware decides about that
-     * guard's user, not the default guard's, and a request `auth:` refuses
-     * never reaches them.
+     * guard's user, never the web guard's, and a request `auth:` refuses never
+     * reaches them.
      *
      * @return void
      */
@@ -137,11 +137,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
             $router->get('/api/' . \strtok($middleware, ':'), static fn (): string => 'ok')->middleware(['auth:api', $middleware]);
         }
 
-        $this->seedGrantedUser();
-
+        $granted   = $this->seedGrantedUser();
         $bystander = AuthenticatableGrantee::create(['id' => 'bystander']);
-        $request   = function (string $uri, ?string $token) use ($bystander): TestResponse {
-            $this->actingAsGuest('api')->actingAs($bystander, 'web');
+        $request   = function (string $uri, ?string $token) use ($granted, $bystander): TestResponse {
+            $this->actingAsGuest('api')->actingAs($token === 'signed-in' ? $bystander : $granted, 'web');
 
             return ($token === null ? $this->withoutToken() : $this->withToken($token))->getJson($uri);
         };
