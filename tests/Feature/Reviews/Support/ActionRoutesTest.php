@@ -224,6 +224,51 @@ final class ActionRoutesTest extends TestCase
     }
 
     /**
+     * A permission or policy deleted once its route is read is left out as
+     * gone, while an unreadable policy is still kept as incomplete evidence.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADefinitionDeletedOnceItsRouteIsReadIsLeftOut(): void
+    {
+        $ann        = self::identity('ann');
+        $permission = self::permission(self::ACTION);
+        $policy     = self::document('gone', [['effect' => 'allow', 'actions' => [self::ACTION]]]);
+        $broken     = self::document('broken', [['effect' => 'allow', 'actions' => [self::ACTION]]]);
+        $deleted    = new \ArrayObject;
+
+        self::grants()->grantPermission($ann, $permission);
+        self::grants()->grantPermission($ann, self::permission('audit:*'));
+        self::grants()->attachPolicy($ann, $policy);
+        self::grants()->attachPolicy($ann, $broken);
+
+        DB::table($broken->getTable())->where('id', $broken->getKey())->update(['document' => '"broken"']);
+
+        DB::listen(static function (QueryExecuted $executed) use ($permission, $policy, $deleted): void {
+            $sql = \strtolower($executed->sql);
+
+            if ($deleted->count() > 0 || !\str_starts_with($sql, 'select') || !\str_contains($sql, 'authorizable_policies')) {
+                return;
+            }
+
+            $deleted->append($sql);
+
+            DB::table($permission->getTable())->where('id', $permission->getKey())->delete();
+            DB::table($policy->getTable())->where('id', $policy->getKey())->delete();
+        });
+
+        $rows = self::held(new Subject($ann, $ann))->rows;
+
+        $this->app?->make('events')->forget(QueryExecuted::class);
+
+        self::assertCount(1, $deleted);
+        self::assertSame(['permission_grant ann audit:*', 'policy_attachment ann broken'], \array_map(self::describe(...), $rows));
+        self::assertFalse($rows[1]->evidence?->isComplete);
+    }
+
+    /**
      * An identity's holdings of the action include every principal's it lists,
      * each row keeping its grantee; a principal's include its identity's but
      * never a sibling's; an incomplete directory stays incomplete on a page

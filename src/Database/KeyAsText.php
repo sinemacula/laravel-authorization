@@ -9,9 +9,9 @@ use Illuminate\Database\Grammar;
 use Illuminate\Database\Query\Grammars\PostgresGrammar;
 
 /**
- * A definition key column read as text, so it compares with a grantee key
- * column on the driver of the query it is compiled for: PostgreSQL casts its
- * `uuid`, any other database stores the key as text already.
+ * A key column read as text, so it compares with a key the grant tables store
+ * as a string on the driver of the query it is compiled for: PostgreSQL casts
+ * its `uuid` or integer, any other database compares the two as they are.
  *
  * The column is wrapped by the grammar the expression is compiled with, so it
  * goes wherever a query takes a column, such as either side of `whereColumn()`,

@@ -28,11 +28,14 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubMachine;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\GuardedPost;
@@ -49,14 +52,14 @@ use Tests\Fixtures\QueryScoping\UuidScopedDocument;
 /**
  * One random scenario of the query scoping parity property: a model, its rows,
  * the subject's grants, policies, boundaries, guardrails and resource policies,
- * the request's tenant, application and session, the manager the query is
- * scoped through, the caller's context and the query itself, drawn from a seed
- * within the constructs this release compiles: a flat tenant tree or a closure
- * table of organisations, accounts and sub-accounts, grants that reach a
- * tenant's subtree or not, for an application or every one, live or expired,
- * platform-wide grants, policies attached to the type and to records, and
- * resource patterns naming records by their key or the start of it. A model may
- * scope itself, through the model-level scope. Every choice is logged, so a
+ * the request's principal, tenant, application and session, the manager the
+ * query is scoped through, the caller's context and the query itself, drawn
+ * from a seed within the constructs this release compiles: a flat tenant tree
+ * or a closure table of organisations, accounts and sub-accounts, grants that
+ * reach a tenant's subtree or not, for an application or every one, live or
+ * expired, platform-wide grants, policies attached to the type and to records,
+ * and resource patterns naming records by their key or the start of it. A model
+ * may scope itself, through the model-level scope. Every choice is logged, so a
  * failure names the scenario.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -119,8 +122,14 @@ final class ParityScenario
     /** @var bool Whether the tenant tree is the closure table, rather than the flat tree. */
     private bool $isClosure = false;
 
-    /** @var \Tests\Feature\Stubs\StubGrantee The subject. */
+    /** @var \Tests\Feature\Stubs\StubGrantee The subject's identity, and the subject unless another principal acts as it. */
     private StubGrantee $user;
+
+    /** @var \Tests\Feature\Stubs\StubGrantee|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondGrantee The principal the request acts as. */
+    private StubGrantee|StubMachine|StubSecondGrantee $principal;
+
+    /** @var bool Whether the construct outside the subset is attached to the user, rather than to another principal. */
+    private bool $isOutsideOnUser = true;
 
     /** @var string The model's morph type. */
     private string $type = '';
@@ -139,11 +148,12 @@ final class ParityScenario
         /** The application the scenario binds its request in. */
         private readonly Application $app,
     ) {
-        $this->random  = new Randomizer(new Mt19937($seed));
-        $this->model   = $this->pick(DB::connection()->getDriverName() === 'pgsql' ? [...self::MODELS, UuidScopedDocument::class] : self::MODELS);
-        $this->action  = $this->model === GuardedPost::class ? GuardedPost::ACTION : $this->pick(self::ACTIONS);
-        $this->user    = StubGrantee::create(['id' => 'u1']);
-        $this->manager = self::service(AuthorizationManager::class);
+        $this->random    = new Randomizer(new Mt19937($seed));
+        $this->model     = $this->pick(DB::connection()->getDriverName() === 'pgsql' ? [...self::MODELS, UuidScopedDocument::class] : self::MODELS);
+        $this->action    = $this->model === GuardedPost::class ? GuardedPost::ACTION : $this->pick(self::ACTIONS);
+        $this->user      = StubGrantee::create(['id' => 'u1']);
+        $this->principal = $this->user;
+        $this->manager   = self::service(AuthorizationManager::class);
     }
 
     /**
@@ -266,8 +276,9 @@ final class ParityScenario
 
     /**
      * Add one construct outside this release's subset that a check would weigh,
-     * attached to the subject so it is material, and log it. A source not
-     * marked `ScopeInvariant` is registered for the one that reads it.
+     * attached to the user or the principal, and log it; the manager is then
+     * chosen so it is material. A source not marked `ScopeInvariant` is
+     * registered for the one that reads it.
      *
      * @return void
      *
@@ -293,14 +304,32 @@ final class ParityScenario
         $construct = $this->pick(\array_keys($constructs));
         $statement = $constructs[$construct] ?? $deny;
 
-        $this->log[] = "outside construct {$construct}";
+        // The model-level scope decides about the principal, which a machine's
+        // identity grants nothing to.
+        $this->isOutsideOnUser = $this->principal === $this->user || (!($this->isModelScoped() && $this->principal instanceof StubMachine) && $this->pick([true, false]));
+        $this->log[]           = "outside construct {$construct} on the " . ($this->isOutsideOnUser ? 'user' : 'principal');
 
         if ($construct === 'unmarked-source') {
             self::service(ConfigRepository::class)->set('authorization.context.sources', [PlanContextSource::class]);
             $this->app->forgetInstance(CheckContextFactory::class);
         }
 
-        $this->user->attachPolicy($this->policy('outside', [$statement]));
+        ($this->isOutsideOnUser ? $this->user : $this->principal)->attachPolicy($this->policy('outside', [$statement]));
+    }
+
+    /**
+     * Return the managers a construct outside the subset is material through:
+     * those deciding about the principal, unless it is attached to the user and
+     * the principal is a machine, and those deciding about the user when it is
+     * attached to the user.
+     *
+     * @return list<string>
+     */
+    private function outsideManagers(): array
+    {
+        $onPrincipal = !$this->isOutsideOnUser || !$this->principal instanceof StubMachine ? ['current', 'capped'] : [];
+
+        return [...$onPrincipal, ...($this->isOutsideOnUser ? ['for', 'forUser'] : [])];
     }
 
     /**
@@ -325,11 +354,35 @@ final class ParityScenario
         $session     = $this->pick([null, 'session-1']);
         $isMet       = $this->random->getInt(0, 1) === 1;
 
-        $this->app->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($this->user, $this->user, $active, $application, null, $session)));
+        $this->principal = $this->principal();
+        $scopes          = $this->principal instanceof StubMachine ? CredentialScopes::of(['posts:*']) : null;
+
+        $this->app->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($this->principal, $this->user, $active, $application, null, $session, $scopes)));
         $this->app->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker($isMet));
 
         $this->log[] = 'tenant ' . self::nameOf($active) . ', application ' . ($application ?? 'none') . ', session ' . ($session ?? 'none');
         $this->log[] = 'requirements ' . ($isMet ? 'met' : 'unmet');
+    }
+
+    /**
+     * Return the principal the request acts as, with the user as its identity:
+     * the user itself, another grantee acting as the user, or a machine client
+     * acting with the user's identity, whose credential covers every action
+     * scoped to.
+     *
+     * @return \Tests\Feature\Stubs\StubGrantee|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondGrantee
+     */
+    private function principal(): StubGrantee|StubMachine|StubSecondGrantee
+    {
+        $kind = $this->pick(['user', 'user', 'impersonator', 'machine']);
+
+        $this->log[] = "principal {$kind}";
+
+        return match ($kind) {
+            'impersonator' => StubSecondGrantee::query()->create(['id' => 'p1']),
+            'machine'      => StubMachine::query()->create(['id' => 'm1']),
+            default        => $this->user,
+        };
     }
 
     /**
@@ -367,9 +420,9 @@ final class ParityScenario
     }
 
     /**
-     * Grant the subject permissions and roles, each in a tenant or the
-     * platform, for an application or every one, live or expired, some roles
-     * through a parent.
+     * Grant the user, or the principal acting as it, permissions and roles,
+     * each in a tenant or the platform, for an application or every one, live
+     * or expired, some roles through a parent.
      *
      * @return void
      */
@@ -382,13 +435,15 @@ final class ParityScenario
             $app        = $this->pick([null, null, 'admin', 'mobile']);
             $kind       = $this->pick(['permission', 'role', 'inherited-role']);
             $isSubtree  = $this->random->getInt(0, 2) > 0;
+            $grantee    = $this->pick([$this->user, $this->user, $this->principal]);
 
             $until       = $expiry === null ? '' : ' until ' . $expiry->format('H:i');
             $reach       = $isSubtree ? ' and below' : ' alone';
-            $this->log[] = "grant {$kind} {$permission->name} in " . self::nameOf($tenant) . $reach . ' for ' . ($app ?? 'every application') . $until;
+            $whom        = \class_basename($grantee);
+            $this->log[] = "grant {$kind} {$permission->name} to {$whom} in " . self::nameOf($tenant) . $reach . ' for ' . ($app ?? 'every application') . $until;
 
             if ($kind === 'permission') {
-                $this->user->givePermission($permission, $expiry, self::scopeOf($tenant), $isSubtree, $app);
+                $grantee->givePermission($permission, $expiry, self::scopeOf($tenant), $isSubtree, $app);
 
                 continue;
             }
@@ -397,15 +452,15 @@ final class ParityScenario
             $role   = $kind === 'role' ? $holder : Role::create(['name' => 'child-' . $index, 'parent_id' => $holder->id]);
 
             $holder->givePermission($permission);
-            $this->user->assignRole($role, $expiry, self::scopeOf($tenant), $isSubtree, $app);
+            $grantee->assignRole($role, $expiry, self::scopeOf($tenant), $isSubtree, $app);
 
             $this->roles[] = $role->id;
         }
     }
 
     /**
-     * Attach the subject's policies, and set a boundary, a guardrail and the
-     * type's resource policies, each sometimes.
+     * Attach the subject's policies, and set boundaries in the platform or a
+     * tenant, a guardrail and the type's resource policies, each sometimes.
      *
      * @return void
      *
@@ -422,8 +477,13 @@ final class ParityScenario
             $this->user->attachPolicy($this->policy('identity-' . $index, $this->statements(false)), null, self::scopeOf($tenant), $isSubtree);
         }
 
-        if ($this->random->getInt(0, 3) === 0) {
-            self::service(BoundaryService::class)->set($this->user, $this->policy('boundary', $this->capStatements()));
+        for ($index = $this->random->getInt(0, 3) - 1; $index > 0; $index--) {
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
+
+            $this->log[] = 'boundary in ' . self::nameOf($tenant) . ($isSubtree ? ' and below' : ' alone');
+
+            self::service(BoundaryService::class)->set($this->user, $this->policy('boundary-' . $index, $this->capStatements()), self::scopeOf($tenant), $isSubtree);
         }
 
         if ($this->random->getInt(0, 3) === 0) {
@@ -628,9 +688,9 @@ final class ParityScenario
 
     /**
      * Choose the manager the query is scoped through: the current one, or a
-     * clone for the subject, its user, a policy override or a cap; never an
-     * override when a construct outside the subset is to be weighed, since it
-     * replaces the policies that hold it.
+     * clone for the user, a policy override or a cap; never an override when a
+     * construct outside the subset is to be weighed, since it replaces the
+     * policies that hold it, and only one the construct is material through.
      *
      * @param  bool  $isOutside
      * @return void
@@ -645,7 +705,7 @@ final class ParityScenario
 
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
         $manager = $this->app->make(AuthorizationManager::class);
-        $choice  = $this->isModelScoped() ? 'current' : $this->pick($isOutside ? ['current', 'for', 'forUser', 'capped'] : ['current', 'for', 'forUser', 'withPolicies', 'capped']);
+        $choice  = $this->isModelScoped() ? 'current' : $this->pick($isOutside ? $this->outsideManagers() : ['current', 'for', 'forUser', 'withPolicies', 'capped']);
         $user    = $this->user;
 
         $this->manager = match ($choice) {

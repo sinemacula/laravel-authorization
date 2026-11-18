@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\ScopeClass;
 use SineMacula\Laravel\Authorization\Query\ScopeClasses;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -379,6 +380,28 @@ final class ScopeClassesTest extends TestCase
         self::assertNotContains('b1', $kept);
         self::assertContains('o1', $kept);
         self::assertContains('s1', $kept);
+    }
+
+    /**
+     * A boundary set in an account caps the rows of the account and its
+     * subtree, as `check()` caps them, and leaves the other rows alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryInATenantCapsTheRowsOfItsSubtree(): void
+    {
+        [$user, $tenants] = $this->tree();
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']), null, $tenants['o1']);
+
+        app(BoundaryService::class)->set($user, self::storedPolicy('no-view', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $tenants['a1']);
+
+        $manager = $this->resolveRequest($user, $tenants['o1']);
+
+        self::assertAgrees($manager, 'posts:view', 'view in o1');
+        self::assertSame(['o1', 'a2', 'none'], self::kept($manager, 'posts:view'));
     }
 
     /**

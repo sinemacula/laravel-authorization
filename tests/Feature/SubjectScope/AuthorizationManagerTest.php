@@ -31,6 +31,7 @@ use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ScopedPost;
+use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
@@ -222,6 +223,32 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($inSecond->explain(self::CREATE)->isAllowed());
         self::assertSame([], $inSecond->permissionsFor(null, AuthorizationScope::tenant($this->second)));
         self::assertSame([], self::titles($inSecond));
+    }
+
+    /**
+     * A query scoped through `for()` of a subject in another tenant keeps that
+     * tenant's rows and those of no tenant at every execution, and one scoped
+     * for the request afterwards keeps the request's tenant's.
+     *
+     * @return void
+     */
+    public function testAQueryForASubjectInAnotherTenantKeepsThatTenantsRows(): void
+    {
+        [$member] = $this->heldInTheRequestsTenantAndOnThePlatform();
+
+        $this->resolveRequest($member, $this->second, 'web');
+
+        foreach ([$this->first, $this->first, $this->second, null] as $index => $tenant) {
+            TenantScopedPost::query()->create(['title' => 'p' . $index, 'tenant_type' => $tenant?->getMorphClass(), 'tenant_id' => $tenant?->getKey()]);
+        }
+
+        $query = TenantScopedPost::query()->whereAuthorized(self::CREATE, [], Authorization::for($this->subject($this->first)))->orderBy('id'); // @phpstan-ignore method.notFound
+
+        self::assertSame(['p0', 'p1', 'p3'], $query->pluck('title')->all());
+        self::assertSame(3, $query->count());
+        self::assertSame(['p0', 'p1', 'p3'], $query->pluck('title')->all());
+        self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
+        self::assertSame(['p2', 'p3'], TenantScopedPost::query()->whereAuthorized(self::CREATE)->orderBy('id')->pluck('title')->all()); // @phpstan-ignore method.notFound
     }
 
     /**
