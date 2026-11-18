@@ -229,11 +229,12 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
   relation's definition used by `whereHas()`, `has()`, `withCount()` or `withExists()`, its scope is never applied and
   the query refuses. A relation scoped in its definition is honoured when it is loaded; to filter by a relation, pass
   the scope in the relation's constraint.
-- A pair naming a declared model is looked up on the write connection, and never with a key that names no record or the
-  key column could not hold, which PostgreSQL would answer with an error that aborts the transaction around it: such a
-  key denies as `resource_unresolved`. An integer key names a record only as an integer's canonical text within 64 bits,
-  as the scope compares it, so `[Post::class, '07']` is never decided as record 7 under another identifier, tenantless
-  model or not.
+- A pair naming a declared model with tenant columns is looked up on the write connection, and never with a key the key
+  column could not hold, which PostgreSQL would answer with an error that aborts the transaction around it: such a key
+  denies as `resource_unresolved`, as does a record that does not exist. A tenantless model's record is never looked up.
+  For either, when the model's key type is an integer, a key names a record only as an integer's canonical text within
+  64 bits, as the scope compares it, so `[Post::class, '07']` denies as `resource_unresolved` rather than be decided as
+  record 7 under another identifier.
 
 ## Limits
 

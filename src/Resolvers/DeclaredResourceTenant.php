@@ -26,15 +26,17 @@ use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
  * A pair names a declared model by its morph type, through the morph map, or by
  * its class: the record is looked up for its tenant columns alone, with no
  * scope, on the write connection, so a record just moved to another tenant is
- * read as it is now, not as a replica last saw it. A pair naming a record that
- * does not exist cannot be told, so the check denies it as
- * `resource_unresolved`; so does a pair whose key names no record or the key
- * column could not hold, which is never looked up: for an integer-keyed model,
- * tenantless or not, a key that is not an integer's canonical text within 64
- * bits, since the query scope compares keys so (`07` and `-0` name no record),
- * and, on PostgreSQL, which raises an error for it (and aborts the transaction
- * around the query), a key that is not an integer the column's integer type
- * holds, not a uuid for a uuid column, or not UTF-8.
+ * read as it is now, not as a replica last saw it. A tenantless model's record
+ * is not looked up, since it has no tenant to read. The check denies as
+ * `resource_unresolved` a pair whose key names no record, which is never looked
+ * up, tenantless model or not: for a model whose key type is an integer, a key
+ * that is not an integer's canonical text within 64 bits, since the query scope
+ * compares keys so (`07` and `-0` name no record). For a model with tenant
+ * columns it denies so a pair naming a record that does not exist, which cannot
+ * be told, and one whose key the key column could not hold, which is never
+ * looked up: on PostgreSQL, which raises an error for it (and aborts the
+ * transaction around the query), a key that is not an integer the column's
+ * integer type holds, not a uuid for a uuid column, or not UTF-8.
  *
  * It answers many resources at once for a bulk check (see
  * `BulkResourceTenantResolver`): the declared models from their declarations,
