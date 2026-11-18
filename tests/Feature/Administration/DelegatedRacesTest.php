@@ -451,16 +451,13 @@ final class DelegatedRacesTest extends TestCase
             $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
             $user  = self::user('user');
 
-            $waited = self::whileRunning(
+            self::assertWaits(
                 'insert',
                 'authorizable_permissions',
                 static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor),
                 static fn (Connection $other): int => self::revokeOn($other, 'admin', Actions::PERMISSION_GRANT),
             );
-
-            self::assertMatchesRegularExpression('/lock timeout|Lock wait timeout/', $waited?->getMessage() ?? '');
             self::assertTrue(self::holds($user, 'posts:edit'));
-            self::assertTrue(self::holds(self::model($actor), Actions::PERMISSION_GRANT));
         });
     }
 

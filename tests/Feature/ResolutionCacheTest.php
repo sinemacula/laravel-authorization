@@ -264,7 +264,7 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * An entry another worker stores from the rows before a revocation commits
-     * is never served once it has.
+     * is served until it does, and never once it has.
      *
      * @return void
      *
@@ -280,7 +280,10 @@ final class ResolutionCacheTest extends TestCase
             OperationScope::dispatch($revoked);
 
             $this->permissions($this->request());
+            $this->permissions($this->request());
         });
+
+        self::assertSame(1, $this->resolutions);
 
         $this->permissions($this->request());
 

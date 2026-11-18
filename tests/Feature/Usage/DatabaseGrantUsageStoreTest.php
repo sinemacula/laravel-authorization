@@ -203,19 +203,19 @@ final class DatabaseGrantUsageStoreTest extends TestCase
 
         $store->record(UsageBatch::of([self::observation('b', null, self::TEN + 3600)], self::TEN + 3700));
 
-        $writes = self::writesDuring(static function () use ($store): void {
+        $statements = self::statementsDuring(['a', 'b', 'c'], static function () use ($store): void {
             $observations = [self::observation('c', null, self::TEN), self::observation('b', null, self::TEN), self::observation('a', null, self::TEN)];
 
             $store->record(UsageBatch::of($observations, self::TEN + 3700));
         });
 
-        self::assertSame([['insert', ['a', 'c']]], $writes);
+        self::assertSame([['select', ['a', 'b', 'c']], ['insert', ['a', 'c']]], $statements);
         self::assertSame(3, DB::table('grant_usage')->count());
     }
 
     /**
-     * A batch of more than a hundred routes is written a hundred to an insert
-     * and read back whole, a hundred keys to a read.
+     * A batch of more than a hundred routes is read and written a hundred to a
+     * statement, and read back whole, a hundred keys to a read.
      *
      * @return void
      */
@@ -224,16 +224,18 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $store = new DatabaseGrantUsageStore;
         $keys  = \array_map(static fn (int $route): string => \sprintf('route-%03d', $route), \range(1, 250));
 
-        $batch   = UsageBatch::of(\array_map(static fn (string $key): array => self::observation($key, null, self::TEN), $keys), self::TEN + 5);
-        $inserts = self::statementsDuring('insert', static fn () => $store->record($batch));
+        $batch  = UsageBatch::of(\array_map(static fn (string $key): array => self::observation($key, null, self::TEN), $keys), self::TEN + 5);
+        $writes = self::statementsDuring($keys, static fn () => $store->record($batch));
 
         $found = [];
-        $reads = self::statementsDuring('select', static function () use ($store, $keys, &$found): void {
+        $reads = self::statementsDuring($keys, static function () use ($store, $keys, &$found): void {
             $found = $store->lastObserved($keys);
         });
 
-        self::assertSame([100, 100, 50], $inserts);
-        self::assertSame([100, 100, 50], $reads);
+        $sizes = static fn (array $statements): array => \array_map(static fn (array $statement): array => [$statement[0], \count($statement[1])], $statements);
+
+        self::assertSame([['select', 100], ['insert', 100], ['select', 100], ['insert', 100], ['select', 50], ['insert', 50]], $sizes($writes));
+        self::assertSame([['select', 100], ['select', 100], ['select', 50]], $sizes($reads));
         self::assertEqualsCanonicalizing($keys, \array_keys($found));
     }
 
@@ -439,50 +441,24 @@ final class DatabaseGrantUsageStoreTest extends TestCase
     }
 
     /**
-     * Return each write the call made to the usage table, as its statement and
-     * the route keys it names, in order.
+     * Return each statement the call ran on the usage table, as its kind and
+     * the given route keys it names, in order.
      *
+     * @param  list<string>  $keys
      * @param  \Closure(): void  $call
      * @return list<array{string, list<string>}>
      */
-    private static function writesDuring(\Closure $call): array
-    {
-        $writes = [];
-
-        DB::listen(static function (QueryExecuted $query) use (&$writes): void {
-            if (\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'grant_usage')) {
-                return;
-            }
-
-            $keys     = \array_values(\array_filter($query->bindings, static fn (mixed $binding): bool => \in_array($binding, ['a', 'b', 'c'], true)));
-            $writes[] = [\strtok($query->sql, ' ') ?: '', $keys];
-        });
-
-        $call();
-
-        Event::forget(QueryExecuted::class);
-
-        return $writes;
-    }
-
-    /**
-     * Return how many route keys each statement of the kind the call ran on the
-     * usage table names, in order.
-     *
-     * @param  string  $kind
-     * @param  \Closure(): void  $call
-     * @return list<int>
-     */
-    private static function statementsDuring(string $kind, \Closure $call): array
+    private static function statementsDuring(array $keys, \Closure $call): array
     {
         $statements = [];
 
-        DB::listen(static function (QueryExecuted $query) use ($kind, &$statements): void {
-            if (!\str_starts_with($query->sql, $kind) || !\str_contains($query->sql, 'grant_usage')) {
+        DB::listen(static function (QueryExecuted $query) use ($keys, &$statements): void {
+            if (!\str_contains($query->sql, 'grant_usage')) {
                 return;
             }
 
-            $statements[] = \count(\array_filter($query->bindings, static fn (mixed $binding): bool => \is_string($binding) && \str_starts_with($binding, 'route-')));
+            $named        = \array_values(\array_filter($query->bindings, static fn (mixed $binding): bool => \in_array($binding, $keys, true)));
+            $statements[] = [\strtok($query->sql, ' ') ?: '', $named];
         });
 
         $call();

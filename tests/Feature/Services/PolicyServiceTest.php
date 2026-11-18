@@ -223,7 +223,7 @@ final class PolicyServiceTest extends TestCase
 
     /**
      * Rewriting a policy with the document it was created from changes nothing
-     * and reports nothing.
+     * and reports nothing, so a guardrail's policy is not refused as edited.
      *
      * @return void
      *
@@ -233,6 +233,7 @@ final class PolicyServiceTest extends TestCase
     {
         $policy = self::service()->create('readers', self::READ);
 
+        DB::table('guardrails')->insert(['policy_id' => $policy->id]);
         Event::fake([PolicyUpdated::class]);
 
         $rewritten = self::service()->rewrite(Policy::query()->findOrFail($policy->id), self::READ);

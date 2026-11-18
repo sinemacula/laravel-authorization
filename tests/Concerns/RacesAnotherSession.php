@@ -9,8 +9,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Races a call with a second database session, on MySQL and PostgreSQL, so a
- * test can show what the call's locks hold back. SQLite has one writer, so a
- * race is skipped there.
+ * test can show what the call's locks hold back and what it reads of a change
+ * committed while it runs. SQLite has one writer, so a race is skipped there.
  *
  * A race must run outside the test's transaction, or the second session sees
  * none of the rows the test made: the test class leaves its raced tests out of
@@ -55,6 +55,12 @@ trait RacesAnotherSession
         try {
             $race();
         } finally {
+            // The roles' parent key restricts a delete, so the hierarchy goes
+            // first.
+            if (\in_array('roles', $tables, true)) {
+                DB::table('roles')->update(['parent_id' => null]);
+            }
+
             foreach ($tables as $table) {
                 DB::table($table)->delete();
             }
@@ -66,15 +72,16 @@ trait RacesAnotherSession
     /**
      * Run the call and, once it runs a statement of the kind on the table, the
      * concurrent call on the second session, as the package's connection,
-     * rolled back; return what the concurrent call threw.
+     * rolled back, and assert the concurrent call waited for a lock until it
+     * gave up.
      *
      * @param  string  $kind
      * @param  string  $table
      * @param  \Closure(): mixed  $call
      * @param  \Closure(\Illuminate\Database\Connection): mixed  $concurrent
-     * @return \Throwable|null
+     * @return void
      */
-    protected static function whileRunning(string $kind, string $table, \Closure $call, \Closure $concurrent): ?\Throwable
+    protected static function assertWaits(string $kind, string $table, \Closure $call, \Closure $concurrent): void
     {
         /** @var \ArrayObject<int, \Throwable> $thrown */
         $thrown = new \ArrayObject;
@@ -94,7 +101,36 @@ trait RacesAnotherSession
 
         $call();
 
-        return $thrown->getArrayCopy()[0] ?? null;
+        $waited = $thrown->getArrayCopy()[0] ?? null;
+
+        self::assertMatchesRegularExpression('/lock timeout|Lock wait timeout/', $waited?->getMessage() . ' ' . $waited?->getPrevious()?->getMessage());
+    }
+
+    /**
+     * Run the call, committing the change on the second session once the call
+     * has made its first read inside its transaction, which fixes its snapshot
+     * on MySQL.
+     *
+     * @param  \Closure(): mixed  $call
+     * @param  \Closure(\Illuminate\Database\Connection): mixed  $change
+     * @return mixed
+     */
+    protected static function afterFirstRead(\Closure $call, \Closure $change): mixed
+    {
+        $package = DB::connection();
+        $isDone  = false;
+
+        DB::listen(static function (QueryExecuted $query) use ($package, $change, &$isDone): void {
+            if ($isDone || $query->connectionName !== $package->getName() || $package->transactionLevel() === 0 || !\str_starts_with(\strtolower($query->sql), 'select')) {
+                return;
+            }
+
+            $isDone = true;
+
+            $change(DB::connection(self::OTHER_SESSION));
+        });
+
+        return $call();
     }
 
     /**

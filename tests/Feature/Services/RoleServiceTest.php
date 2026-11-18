@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Services;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -83,7 +84,7 @@ final class RoleServiceTest extends TestCase
         RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection;
 
     /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
-    private const array RACED = ['testConcurrentParentsClosingACycleLeaveOneRefused'];
+    private const array RACED = ['testAParentCommittedMeanwhileThatClosesACycleIsRefused'];
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -788,29 +789,26 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
-     * Two parents set at once that would close a cycle between them queue on
-     * the roles' locks, so the second is refused once the first commits (MySQL
-     * and PostgreSQL).
+     * A parent another session commits after a parent change first reads, the
+     * two closing a cycle, is seen by the change's ancestor walk, so the change
+     * is refused and no cycle is stored (MySQL and PostgreSQL).
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testConcurrentParentsClosingACycleLeaveOneRefused(): void
+    public function testAParentCommittedMeanwhileThatClosesACycleIsRefused(): void
     {
         $this->raceOrSkip(['roles'], static function (): void {
             $first  = self::role('first');
             $second = self::role('second');
 
-            $waited = self::whileRunning(
-                'update',
-                'roles',
-                static fn (): Role => self::service()->setParent($first, $second),
+            $refusal = self::refusalOf(static fn (): mixed => self::afterFirstRead(
                 static fn (): Role => self::service()->setParent('second', 'first'),
-            );
+                static fn (Connection $other): int => $other->table('roles')->where('id', $first->id)->update(['parent_id' => $second->id]),
+            ));
 
-            self::assertMatchesRegularExpression('/lock timeout|Lock wait timeout/', ($waited?->getPrevious() ?? $waited)?->getMessage() ?? '');
-            self::assertInstanceOf(RoleHierarchyCycleException::class, self::refusalOf(static fn (): Role => self::service()->setParent('second', 'first')));
+            self::assertInstanceOf(RoleHierarchyCycleException::class, $refusal);
             self::assertSame([$second->id, null], [$first->fresh()?->parent_id, $second->fresh()?->parent_id]);
         });
     }
