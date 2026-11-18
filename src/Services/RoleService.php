@@ -341,7 +341,8 @@ final class RoleService
      * when the role did not carry it.
      *
      * A name revokes every permission of that name the role carries, under the
-     * role's guard or guard-agnostic, whichever tenant or the platform owns it.
+     * role's guard or guard-agnostic, among those visible in the tenant that
+     * owns the role, or the platform's for a platform role.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
@@ -574,9 +575,10 @@ final class RoleService
 
     /**
      * Resolve a permission for the role: a name under the role's guard, else
-     * the package default, in the tenant that owns the role; a model once it is
-     * known to be a saved permission, its row as stored for a delegated change
-     * (see `StoredRecords`), so the change is weighed on the stored name.
+     * the package default, in the tenant that owns the role, or on the platform
+     * for a platform role; a model once it is known to be a saved permission,
+     * its row as stored for a delegated change (see `StoredRecords`), so the
+     * change is weighed on the stored name.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  mixed  $permission

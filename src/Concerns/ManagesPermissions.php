@@ -119,9 +119,9 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Detach the given permission from this role, through the role service.
      * `RolePermissionRevoked` fires only when the role carried it. A name
-     * detaches every permission of that name the role carries, the current
-     * tenant's and the platform's alike. Given `actor:`, the revocation is
-     * decided as that actor.
+     * detaches every permission of that name the role carries, its tenant's,
+     * its tenant's ancestors' and the platform's alike. Given `actor:`, the
+     * revocation is decided as that actor.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
