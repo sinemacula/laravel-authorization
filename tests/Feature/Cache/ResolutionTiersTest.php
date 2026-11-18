@@ -262,16 +262,16 @@ final class ResolutionTiersTest extends TestCase
         self::assertSame(['posts:read'], $tiers->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
         self::assertSame(['posts:read'], $memo->get(self::MEMO_KEY));
 
-        Carbon::setTestNow(Carbon::now()->addSeconds(59));
-
-        self::assertNull($memo->get(self::MEMO_KEY));
-
         $this->store->bump([$this->store->granteeKey(self::grantee())]);
 
         $fresh = new ResolutionMemo;
 
         self::assertNull((new ResolutionTiers($fresh, $this->store, 'authorization-test', 300, false, false))->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
         self::assertNull($fresh->get(self::MEMO_KEY));
+
+        Carbon::setTestNow(Carbon::now()->addSeconds(59));
+
+        self::assertNull($memo->get(self::MEMO_KEY));
     }
 
     /**
@@ -304,26 +304,24 @@ final class ResolutionTiersTest extends TestCase
         $this->tiers()->keep('permissions', self::grantee(), new Resolution(['posts:read'], 60), $this->pins(), true, null);
         $this->repository->put(self::KEY, $this->stored(), 600);
 
-        Carbon::setTestNow(Carbon::now()->addSeconds(59));
+        Carbon::setTestNow(Carbon::now()->addSeconds(60));
 
-        $memo = new ResolutionMemo;
+        $tiers = new ResolutionTiers(new ResolutionMemo, $this->store, 'authorization-test', 300, false, false);
 
-        self::assertNull((new ResolutionTiers($memo, $this->store, 'authorization-test', 300, false, false))->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
-        self::assertNull($memo->get(self::MEMO_KEY));
+        self::assertNull($tiers->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
     }
 
     /**
-     * An entry a bulk read found past its until is not served.
+     * An entry a bulk read found is not served once its until is reached.
      *
      * @return void
      */
     public function testABulkReadSkipsALapsedEntry(): void
     {
+        $tiers = new ResolutionTiers(new ResolutionMemo, $this->store, 'authorization-test', 300, false, false);
         $found = [self::KEY => ['versions' => $this->pins()->tokens(), 'value' => ['posts:read'], 'until' => Carbon::now()->getTimestamp()]];
-        $memo  = new ResolutionMemo;
 
-        self::assertNull((new ResolutionTiers($memo, $this->store, 'authorization-test', 300, false, false))->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...), $found));
-        self::assertNull($memo->get(self::MEMO_KEY));
+        self::assertNull($tiers->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...), $found));
     }
 
     /**
