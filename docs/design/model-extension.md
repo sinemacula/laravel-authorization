@@ -21,12 +21,13 @@ explains the extension path and walks through a concrete example: adding soft de
    value -- raises `InvalidAuthorizationConfigException` naming the offending key when the application boots. After
    boot, `ModelClasses::get()` checks only that the value is a non-empty string.
 
-3. **Subclasses inherit all package behaviour.** The shipped models attach their observers with `#[ObservedBy]`, and
-   `Role` and `Permission` their tenant scope with `#[ScopedBy]`, which Laravel applies to a subclass too. The rest
-   comes from traits: a `name` mutator validates the name, and `boot<Trait>()` methods, which Laravel calls by
-   convention, add hooks such as system protection. A subclass therefore keeps lifecycle events, system protection,
-   name validation and tenant scoping without doing anything; one that overrides a trait's boot method, such as
-   `bootHasSystemProtection()`, calls the parent's.
+3. **Subclasses inherit all package behaviour.** The shipped models attach their observers with `#[ObservedBy]`, which
+   Laravel applies to a subclass too. The rest comes from traits: a `name` mutator validates the name, and
+   `boot<Trait>()` methods, which Laravel calls by convention, add hooks such as system protection and the tenant scope
+   on `Role` and `Permission`. The tenant scope is not registered with `#[ScopedBy]`, since Laravel 12 does not apply
+   that attribute to a subclass. A subclass therefore keeps lifecycle events, system protection, name validation and
+   tenant scoping without doing anything; one that overrides a trait's boot method, such as
+   `bootHasSystemProtection()` or `bootHasTenantScope()`, calls the parent's.
 
 4. **Schema changes are the consumer's responsibility.** The package ships migrations for its own columns. A subclass
    that adds columns (e.g. `deleted_at`, `archived_at`) must ship its own migration -- either in the application's
@@ -145,5 +146,6 @@ column, and register the swap. The package treats all three entity models symmet
 - `HasRoleHierarchyTest::testParentReturnsConfiguredRoleClass`, `testChildrenReturnsConfiguredRoleClass` and
   `testAncestorsCycleLookupUsesConfiguredRoleClass` -- the relations and the cycle check.
 - `HasSystemProtectionTest::testSubclassExtendingBootHookKeepsProtection` -- a subclass keeps system protection.
+- `HasTenantScopeTest::testSubclassesKeepTenantScoping` -- a subclass keeps tenant scoping.
 - `RoleObserverTest::testCycleCheckLooksUpProposedParentThroughConfiguredRoleClass` -- the observer's cycle check
   hydrating the configured class.
