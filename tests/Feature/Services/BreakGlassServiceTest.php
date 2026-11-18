@@ -480,6 +480,56 @@ final class BreakGlassServiceTest extends TestCase
     }
 
     /**
+     * An impersonated actor holding the break-glass rights activates or ends an
+     * activation only when also allowed the impersonated right, for an
+     * activation across its whole reach.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnImpersonatedActorNeedsTheImpersonatedRight(): void
+    {
+        self::emergencyRole(self::ACTION);
+
+        $actor  = self::administrator([PackagePermissions::BREAK_GLASS_ACTIVATE, PackagePermissions::BREAK_GLASS_REVOKE], 'user-1', null);
+        $user   = self::principalOf($actor);
+        $theirs = self::activateFor(StubGrantee::query()->create(['id' => 'user-2']));
+        $posing = $actor->impersonatedBy(new Reference('support', '9'));
+        $right  = Permission::query()->create(['name' => PackagePermissions::ADMINISTRATION_IMPERSONATED]);
+
+        $inOrg = static fn (bool $isSubtree): BreakGlassActivation => TenantScope::within(self::tenant('org1'), null, static fn (): BreakGlassActivation => self::activateFor(
+            $user,
+            $posing,
+            new GrantScope(self::tenant('org1'), null, $isSubtree),
+        ));
+
+        $refusals = [
+            self::refusalOf(static fn () => self::activateFor($user, $posing)),
+            self::refusalOf(static fn () => self::service()->revoke($theirs, $posing)),
+        ];
+
+        GrantService::instance()?->grantPermission($user, $right, tenant: self::tenant('org1'), includeSubtree: false);
+
+        $refusals[] = self::refusalOf(static fn () => $inOrg(true));
+
+        foreach ($refusals as $refusal) {
+            self::assertInstanceOf(AuthorizationException::class, $refusal);
+            self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $refusal->getReason());
+        }
+
+        self::assertSame(1, BreakGlassActivation::query()->count());
+        self::assertNull(BreakGlassActivation::query()->findOrFail($theirs->id)->ended_at);
+
+        $inOrg(false);
+        GrantService::instance()?->grantPermission($user, $right);
+        self::activateFor($user, $posing);
+
+        self::assertSame(1, self::service()->revoke($theirs, $posing));
+        self::assertSame(3, BreakGlassActivation::query()->count());
+    }
+
+    /**
      * A trusted revocation ends an activation as revoked by no one; a delegated
      * one needs the revoke right in the activation's scope and records the
      * actor; ending one ended or expired changes nothing, a normal grant is
