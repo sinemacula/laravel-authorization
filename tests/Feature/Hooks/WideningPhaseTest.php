@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Hooks;
 
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -583,6 +585,77 @@ final class WideningPhaseTest extends TestCase
 
         self::assertSame([], self::rolesOf($first, self::authorizationConnection()->getName()));
         self::assertSame([], $hook->widenings);
+    }
+
+    /**
+     * A deadlock the hook's own preparation meets tries a delegated call again,
+     * hook included, and refuses it as a conflict once no tries are left, each
+     * failed try's preparation rolled back; a trusted call throws it on.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeadlockInTheHookTriesADelegatedCallAgain(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $actor = self::administrator();
+
+        [, [$first, $second]] = $this->principals();
+
+        config(['authorization.administration.retries' => 2]);
+
+        $prepared = self::authorizationConnection()->table('hook_preparations');
+
+        self::authorizationConnection()->getSchemaBuilder()->create('hook_preparations', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('step');
+        });
+
+        $deadlocking = fn (int $times): RecordingGrantHook => $this->hook(static function () use (&$times): void {
+            self::authorizationConnection()->table('hook_preparations')->insert(['step' => 'prepared']);
+
+            if ($times-- > 0) {
+                $deadlock = new \PDOException('Deadlock found when trying to get lock; try restarting transaction');
+
+                throw new QueryException('authorization', 'insert into hook_preparations', [], $deadlock);
+            }
+        });
+
+        $hook    = $deadlocking(1);
+        $outcome = self::grants()->grantRole($first, Role::query()->create(['name' => 'retried']), actor: $actor, tenant: self::tenant('acct1'));
+
+        self::assertSame(GrantOutcome::GRANTED, $outcome);
+        self::assertCount(2, $hook->widenings);
+        self::assertSame(1, $prepared->count());
+
+        $hook = $deadlocking(\PHP_INT_MAX);
+
+        try {
+            self::grants()->grantRole($second, Role::query()->create(['name' => 'refused']), actor: $actor, tenant: self::tenant('org2'));
+
+            self::fail('The grant was made.');
+        } catch (AuthorizationException $refusal) {
+            self::assertSame('administration.conflict', $refusal->getReason()->value);
+        }
+
+        self::assertCount(3, $hook->widenings);
+        self::assertSame([], self::rolesOf($second, self::authorizationConnection()->getName()));
+        self::assertSame(1, $prepared->count());
+
+        $hook = $deadlocking(1);
+
+        try {
+            self::grants()->grantRole($second, Role::query()->create(['name' => 'trusted']), tenant: self::tenant('org2'));
+
+            self::fail('The grant was made.');
+        } catch (QueryException $deadlock) {
+            self::assertStringContainsString('Deadlock found', $deadlock->getMessage());
+        }
+
+        self::assertCount(1, $hook->widenings);
+        self::assertSame(1, $prepared->count());
     }
 
     /**

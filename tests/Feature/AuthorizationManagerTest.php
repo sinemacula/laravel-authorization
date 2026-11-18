@@ -2382,6 +2382,44 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A resource is capped by the boundaries of the tenant it is decided in: a
+     * child tenant's for its own resources, and the platform-wide ones alone
+     * once a check falls back to platform scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBoundariesFollowTheTenantTheCheckIsDecidedIn(): void
+    {
+        [$org, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        foreach (['posts:read', 'posts:edit', 'posts:delete'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]));
+        }
+
+        $readOnly = [['effect' => 'allow', 'actions' => ['posts:read']]];
+
+        self::boundaries()->set($user, self::resourcePolicy('platform-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+        self::boundaries()->set($user, self::resourcePolicy('account-cap', $readOnly), $account);
+        self::boundaries()->set($user, self::resourcePolicy('sibling-cap', $readOnly), $sibling);
+
+        $this->resolveInTenant($user, $org);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit', self::postIn($account))->reason);
+        self::assertTrue(Authorization::can('posts:read', self::postIn($account)));
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($org)));
+
+        $this->resolveInTenant($user, $account);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($sibling)));
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:delete', self::postIn($sibling))->reason);
+    }
+
+    /**
      * The boundaries of the subject's principal and of its identity are
      * intersected: only what both allow passes.
      *
