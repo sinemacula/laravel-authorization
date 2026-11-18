@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -337,8 +338,9 @@ final class ContextBindingsTest extends TestCase
     }
 
     /**
-     * A namespace the bound authentication context contributes decides saved
-     * policies through `can()`, from the values the context supplies.
+     * A declared key of a namespace the bound authentication context
+     * contributes decides saved policies through `can()`, from the values the
+     * context supplies.
      *
      * @return void
      */
@@ -346,6 +348,7 @@ final class ContextBindingsTest extends TestCase
     {
         $this->config()->set('authorization.context.keys', ['mfa' => ['enrolled' => 'bool']]);
         $this->application()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa'], values: ['mfa' => ['enrolled' => true]]));
+        $this->application()->instance(ContextKeyCatalogue::class, ContextBindings::catalogue($this->application()));
 
         foreach (['authorization', AuthorizationManager::class, CheckContextFactory::class] as $abstract) {
             $this->application()->forgetInstance($abstract);

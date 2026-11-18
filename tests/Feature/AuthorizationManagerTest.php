@@ -1180,7 +1180,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testATenantGuardAdmitsOnlyTheSubjectsTenantsRecords(): void
     {
-        [$org, $account] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['org', 'account']);
+        $org     = StubTenant::query()->create(['id' => 'org', 'name' => 'org']);
+        $account = StubTenant::query()->create(['id' => 'account', 'name' => 'account']);
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubGrantee::create(['id' => 'member']), $org));
@@ -1193,12 +1194,17 @@ final class AuthorizationManagerTest extends TestCase
 
         $scope = Authorization::withPolicies([EvaluationPolicy::fromArray(['name' => 'same-tenant', 'statements' => [
             ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['resource.tenant.id' => '${subject.tenant.id}']]],
+            ['effect' => 'allow', 'actions' => ['posts:list'], 'conditions' => ['null' => ['resource.tenant.id' => true]]],
         ]])]);
 
         self::assertTrue($scope->can('posts:read', $post($org)));
+        self::assertFalse($scope->can('posts:list', $post($org)));
         self::assertSame(DecisionReason::CONDITION_FAILED, $scope->check('posts:read', $post($account))->reason);
-        self::assertFalse($scope->can('posts:read', $post(null)));
-        self::assertFalse($scope->can('posts:read', TenantScopedPost::class));
+
+        foreach ([$post(null), TenantScopedPost::class] as $resource) {
+            self::assertFalse($scope->can('posts:read', $resource));
+            self::assertTrue($scope->can('posts:list', $resource));
+        }
     }
 
     /**
@@ -1564,7 +1570,6 @@ final class AuthorizationManagerTest extends TestCase
         $other = StubGrantee::create(['id' => '8']);
         $post  = StubGrantee::create(['id' => 'post-1']);
 
-        $this->app?->instance(RecordingResourceAttributes::class, new RecordingResourceAttributes);
         $this->container()->make(ConfigRepository::class)->set('authorization.attributes.resources', [$post->getMorphClass() => RecordingResourceAttributes::class]);
 
         $policies = [
