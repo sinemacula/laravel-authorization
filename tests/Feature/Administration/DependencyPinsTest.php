@@ -430,6 +430,53 @@ final class DependencyPinsTest extends TestCase
     }
 
     /**
+     * Locking the actor empties the memo, even inside a batch that keeps each
+     * scope's entries, so what the request memoised before the lock is read
+     * again from the rows.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testLockingTheActorEmptiesTheMemo(): void
+    {
+        $actor = StubGrantee::query()->create(['id' => 'admin']);
+
+        GrantService::instance()?->grantPermission($actor, Permission::query()->create(['name' => 'posts:read']));
+
+        ResolutionCache::instance()?->batch(static function () use ($actor): void {
+            self::assertTrue($actor->hasPermission('posts:read'));
+
+            DB::table('authorizable_permissions')->delete();
+
+            self::assertTrue($actor->hasPermission('posts:read'));
+
+            self::pins()->lockActor();
+
+            self::assertFalse($actor->hasPermission('posts:read'));
+        });
+    }
+
+    /**
+     * The actor is locked when no resolution cache is bound.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActorIsLockedWithoutAResolutionCache(): void
+    {
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        $pins = self::pins();
+
+        $pins->lockActor();
+
+        self::assertSame(DependencyPhase::ACTOR, $pins->phase());
+    }
+
+    /**
      * A query is pinned as it was given: a caller that goes on to change its
      * own query never changes what is read again.
      *

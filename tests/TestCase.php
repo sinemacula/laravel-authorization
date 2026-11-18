@@ -218,10 +218,10 @@ abstract class TestCase extends OrchestraTestCase
      * table's primary key (so it can hold null, empty and long keys), each with
      * tenant columns, tickets whose tenant is an integer team id, posts whose
      * tenant id column is an integer, documents keyed by a uuid, posts keyed by
-     * a given 64-bit integer (SQLite's rowid there), the closure table of the
-     * fixture tenant tree, and those of the trees keyed by integers and UUIDs.
-     * The document key and the closure table compare bytes on MySQL, as a key
-     * or a tenant compared with a value must.
+     * a given 64-bit integer (SQLite's rowid there), posts that soft-delete,
+     * the closure table of the fixture tenant tree, and those of the trees
+     * keyed by integers and UUIDs. The document key and the closure table
+     * compare bytes on MySQL, as a key or a tenant compared with a value must.
      *
      * @return void
      */
@@ -278,6 +278,12 @@ abstract class TestCase extends OrchestraTestCase
             $schema->string('title')->nullable();
             $schema->string('tenant_type')->nullable();
             $schema->string('tenant_id')->nullable();
+        });
+
+        Schema::create('scoped_trashable_posts', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('title')->nullable();
+            $schema->softDeletes();
         });
 
         $this->createLooseKeyTables();
