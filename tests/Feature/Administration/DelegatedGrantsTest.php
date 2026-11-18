@@ -301,6 +301,34 @@ final class DelegatedGrantsTest extends TestCase
     }
 
     /**
+     * A revocation by name is decided on every held row of the name, so a
+     * tenant's administrator removing a name the grantee holds both in the
+     * tenant and platform-wide is refused in full, and the tenant's row stays
+     * until it is revoked alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationByNameIsRefusedWholeForARowOutsideTheAdministeredScope(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $owned    = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
+        $platform = Role::query()->create(['name' => 'editor']);
+        $actor    = self::actor('local', [Actions::ROLE_REVOKE => ['tenant' => $tenant]]);
+        $user     = self::user('user');
+
+        self::grants()->grantRole($user, $owned);
+        self::grants()->grantRole($user, $platform);
+
+        $this->actAsTenant($tenant);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::grants()->revokeRole($user, 'editor', $actor));
+        self::assertSame(1, self::grants()->revokeRole($user, $owned, $actor));
+        self::assertSame([$platform->id], DB::table('authorizable_roles')->where('authorizable_id', 'user')->pluck('role_id')->all());
+    }
+
+    /**
      * An ancestor's permission is still granted to a grantee in the tenant
      * itself, which writes the tenant's own row alone.
      *
