@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\SuspendableGrantee;
@@ -34,6 +35,8 @@ use Tests\TestCase;
 #[CoversClass(HeldLifetime::class)]
 final class HeldLifetimeTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /**
      * Freeze the clock.
      *
@@ -171,6 +174,35 @@ final class HeldLifetimeTest extends TestCase
         self::roles()->revokePermission($editor, 'posts:e*');
 
         self::assertSame(Carbon::now()->addDays(2)->getTimestamp(), HeldLifetime::of(self::subject($user), 'posts:edit'));
+    }
+
+    /**
+     * A permission held only through a live activation lasts until the
+     * activation expires, and is not held once it ends, expires or break-glass
+     * is disabled.
+     *
+     * @return void
+     */
+    public function testAnActivationLastsUntilItExpires(): void
+    {
+        $user       = StubGrantee::create(['id' => 'user-1']);
+        $activation = self::activate($user, self::emergencyRole());
+
+        self::assertSame(Carbon::now()->addMinutes(30)->getTimestamp(), HeldLifetime::of(self::subject($user), 'posts:create'));
+
+        self::switchBreakGlass(false);
+
+        self::assertNull(HeldLifetime::of(self::subject($user), 'posts:create'));
+
+        self::switchBreakGlass(true);
+        Carbon::setTestNow(Carbon::now()->addMinutes(30));
+
+        self::assertNull(HeldLifetime::of(self::subject($user), 'posts:create'));
+
+        Carbon::setTestNow(Carbon::now()->subMinute());
+        $activation->update(['ended_at' => Carbon::now()]);
+
+        self::assertNull(HeldLifetime::of(self::subject($user), 'posts:create'));
     }
 
     /**

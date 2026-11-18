@@ -49,8 +49,9 @@ imposed, so an auditor may inspect senior staff on purpose:
 ]}
 ```
 
-A missing key makes a deny on it undecidable, so it refuses there, as policies fail closed; use an `_if_exists` operator
-to let it pass.
+A missing key makes a deny on it undecidable, so it refuses there, as policies fail closed. An `_if_exists` operator
+passes a missing key, so the deny still applies; add a `null` test of the key with `false` to skip the deny where the
+key is missing.
 
 **Admission in every scope a decision is made in.** A decision about the subject is made where any check on its resource
 is made: in the preview's tenant, in a resource's own tenant when that is the preview's tenant or below it, a child

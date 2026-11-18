@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Middleware\TrustProxies;
@@ -19,6 +20,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -27,7 +29,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksAccess;
+use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
@@ -141,6 +145,69 @@ final class AuthorizeActionTest extends TestCase
         $denial = self::denialOf(fn () => $this->get('/posts/post-2'));
 
         self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
+    }
+
+    /**
+     * The bound model reaches the resource attribute provider, so the owner
+     * rule admits the owner and refuses anyone else.
+     *
+     * @return void
+     */
+    public function testTheBoundModelReachesTheResourceAttributeProvider(): void
+    {
+        $post     = StubTenant::create(['id' => 'post-1']);
+        $provider = new RecordingResourceAttributes;
+
+        $this->app?->instance(RecordingResourceAttributes::class, $provider);
+        $this->container()->make(ConfigRepository::class)->set('authorization.attributes.resources', ['post' => RecordingResourceAttributes::class]);
+
+        $policy = Policy::create(['name' => 'owner-deletes', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => [self::ACTION], 'conditions' => ['eq' => ['resource.owner.id' => '${subject.id}']]],
+        ]]]);
+
+        $owner = StubGrantee::create(['id' => '7']);
+        $other = StubGrantee::create(['id' => '8']);
+
+        $owner->attachPolicy($policy);
+        $other->attachPolicy($policy);
+
+        $this->actAs($owner);
+        $this->getJson('/posts/post-1')->assertOk();
+
+        $this->actAs($other);
+        $this->getJson('/posts/post-1')->assertForbidden();
+
+        self::assertCount(2, $provider->calls);
+        self::assertTrue($post->is($provider->calls[0][1]));
+    }
+
+    /**
+     * A resource attribute provider that fails reaches the caller as
+     * `AttributeProviderFailed` through the Gate and the middleware, so a
+     * routed request is a server error, never a refusal or an allow.
+     *
+     * @return void
+     */
+    public function testAFailingAttributeProviderIsAServerError(): void
+    {
+        $this->declarePermissionEnum();
+
+        $post     = StubTenant::create(['id' => 'post-1']);
+        $identity = self::identityHolding(permissions: [self::ACTION]);
+
+        $this->container()->make(ConfigRepository::class)->set('authorization.attributes.resources', ['post' => FailingResourceAttributes::class]);
+
+        $identity->attachPolicy(Policy::create(['name' => 'no-archived-deletes', 'document' => ['statements' => [
+            ['effect' => 'deny', 'actions' => [self::ACTION], 'conditions' => ['eq_if_exists' => ['resource.status' => 'archived']]],
+        ]]]));
+
+        $this->actAs($identity);
+
+        self::assertInstanceOf(AttributeProviderFailed::class, $this->getJson('/posts/post-1')->assertServerError()->exception);
+
+        $this->expectException(AttributeProviderFailed::class);
+
+        Gate::forUser($identity)->allows(self::ACTION, $post);
     }
 
     /**
@@ -412,6 +479,37 @@ final class AuthorizeActionTest extends TestCase
         }
 
         $this->getJson('/posts')->assertForbidden();
+    }
+
+    /**
+     * The off-network deny refuses a routed request from outside its ranges and
+     * admits one from inside, and outside a routed request, where `request.ip`
+     * is missing, it still denies, written `_if_exists` or not.
+     *
+     * @return void
+     */
+    public function testTheOffNetworkDenyRefusesOutsideTheRanges(): void
+    {
+        $strict   = StubGrantee::create(['id' => 'strict']);
+        $optional = StubGrantee::create(['id' => 'optional']);
+
+        foreach ([[$strict, 'ip_not_in'], [$optional, 'ip_not_in_if_exists']] as [$identity, $operator]) {
+            $identity->attachPolicy(Policy::create(['name' => 'no-deletes-off-network-' . $operator, 'document' => ['statements' => [
+                ['effect' => 'allow', 'actions' => [self::ACTION]],
+                ['effect' => 'deny', 'actions' => [self::ACTION], 'conditions' => [$operator => ['request.ip' => ['10.0.0.0/8', '192.168.0.0/16']]]],
+            ]]]));
+        }
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::for($strict)->check(self::ACTION)->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::for($optional)->check(self::ACTION)->reason);
+
+        foreach ([$strict, $optional] as $identity) {
+            $this->actAs($identity);
+
+            $this->withServerVariables(['REMOTE_ADDR' => '10.1.2.3'])->getJson('/posts')->assertOk();
+            $this->withServerVariables(['REMOTE_ADDR' => '192.168.4.5'])->getJson('/posts')->assertOk();
+            $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.7'])->getJson('/posts')->assertForbidden();
+        }
     }
 
     /**
