@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\Narrowing;
 use SineMacula\Laravel\Authorization\Administration\OperationChange;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -19,7 +20,10 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -37,7 +41,7 @@ use Tests\TestCase;
 #[CoversClass(Narrowing::class)]
 final class NarrowingTest extends TestCase
 {
-    use ActsAsTenant, UsesAnAuthorizationConnection;
+    use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, UsesAnAuthorizationConnection;
 
     /**
      * Reset the clock.
@@ -290,6 +294,32 @@ final class NarrowingTest extends TestCase
         Carbon::setTestNow(Carbon::now()->addDays(4));
 
         self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDay())));
+    }
+
+    /**
+     * A grant of a role held only through a live activation never shortens it,
+     * however soon it expires, so an actor who cannot hand out the role is
+     * refused, writing no grant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHeldOnlyThroughAnActivationIsNeverShortened(): void
+    {
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $role    = self::emergencyRole();
+        $expires = Carbon::now()->addMinutes(10);
+        $actor   = self::administrator([PackagePermissions::ROLE_GRANT]);
+
+        self::activate($user, $role);
+
+        self::assertTrue($user->hasRole('responder'));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::ROLE_GRANT, self::change(Reference::of($user), $role, GrantScope::platform(), $expires)));
+        self::assertDelegatedRefusal(
+            DecisionReason::ADMINISTRATION_NOT_GRANTABLE,
+            static fn (): mixed => GrantService::instance()?->grantRole($user, $role, $expires, $actor),
+        );
     }
 
     /**

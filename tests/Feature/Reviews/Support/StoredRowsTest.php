@@ -544,4 +544,31 @@ final class StoredRowsTest extends TestCase
         );
         self::assertSame([], self::trusted(ReviewQuery::grantedBy(new Reference($first->principal()->type, 'nobody'), ReviewScope::everywhere()))->rows);
     }
+
+    /**
+     * A review of an actor's grants leaves out a row whose `granted_by` key is
+     * the actor's but whose type is another's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGrantedByMatchesTheActorsTypeAsWellAsItsKey(): void
+    {
+        $role = self::role('reviewed');
+
+        self::grants()->grantRole(self::identity('ann'), $role);
+        self::grants()->grantRole(self::identity('bob'), $role);
+
+        DB::table('authorizable_roles')->where('authorizable_id', 'ann')->update(['granted_by_type' => 'user', 'granted_by_id' => 'actor-1']);
+        DB::table('authorizable_roles')->where('authorizable_id', 'bob')->update(['granted_by_type' => 'machine', 'granted_by_id' => 'actor-1']);
+
+        $listed = static fn (string $type): array => \array_map(
+            static fn (ReviewRow $row): string => $row->subject->id,
+            self::trusted(ReviewQuery::grantedBy(new Reference($type, 'actor-1'), ReviewScope::everywhere()))->rows,
+        );
+
+        self::assertSame(['ann'], $listed('user'));
+        self::assertSame(['bob'], $listed('machine'));
+    }
 }
