@@ -162,8 +162,8 @@ final class ParityPropertyTest extends TestCase
      * Assert that the scoped query keeps exactly the candidates `check()`
      * allows, and that it is not refused, and return 1. Warm, the checks run
      * first and the query is compiled in a request of its own, after a check
-     * there has warmed the memo, from the store when there is one; cold, the
-     * query is compiled first.
+     * there of the first allowed row, or the first row, has warmed the memo,
+     * from the store when there is one; cold, the query is compiled first.
      *
      * @param  \Tests\Integration\QueryScoping\ParityScenario  $scenario
      * @param  bool  $isWarm
@@ -184,7 +184,7 @@ final class ParityPropertyTest extends TestCase
             $allowed = $checked();
 
             $this->app?->forgetInstance(ResolutionCache::class);
-            $this->isAllowed($scenario, $identity, (string) self::unscoped($scenario)->firstOrFail()->getAttribute($identity)); // @phpstan-ignore cast.string
+            $this->isAllowed($scenario, $identity, $allowed[0] ?? self::identities(self::unscoped($scenario), $identity)[0]);
         }
 
         try {
