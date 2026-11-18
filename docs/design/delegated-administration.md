@@ -62,11 +62,12 @@ administration never grants anything it cannot justify.
 6. **Batches decompose and are atomic.** A sync, `revokeAll()`, `removeAll()` and `detachAll()` decide each change under
    its own action, all before any is written, so one refusal writes and reports nothing, and no change is decided on
    authority an earlier change would have handed out. There is no blanket action. `revokeAll()` decides
-   `boundary.remove` for each boundary it removes. A sync judges which kept rows are live at one instant and re-arms as
-   of the same instant, so a row it decided as kept unchanged is never re-armed undecided, even when it expires before
-   it is written. A role a sync lists with its own reach (`Support\RoleReach`) and holds live with the other is decided
-   as a grant with that reach and the expiry the row keeps, as `grantRole()` decides a changed reach, so a wider one
-   needs the scope its subtree reaches and a narrower one is judged narrowing.
+   `boundary.remove` for each boundary it removes and `break-glass.revoke` for each unexpired activation it ends, in the
+   activation's scope. A sync judges which kept rows are live at one instant and re-arms as of the same instant, so a
+   row it decided as kept unchanged is never re-armed undecided, even when it expires before it is written. A role a
+   sync lists with its own reach (`Support\RoleReach`) and holds live with the other is decided as a grant with that
+   reach and the expiry the row keeps, as `grantRole()` decides a changed reach, so a wider one needs the scope its
+   subtree reaches and a narrower one is judged narrowing.
 
 7. **A call that changes nothing is still decided.** A delegated call that finds nothing to change decides the change it
    was asked for (`OperationResource::unchanged()`, or the revocation of the first candidate of a name the grantee does
@@ -264,24 +265,24 @@ administration never grants anything it cannot justify.
     delegated operation moved (`OperationScope::treeChanged()`).
 
     Once every change is allowed, and before anything is written, every pinned set is read again, once as a decision
-    reads it and once under the lock, and every chain afresh; anything that differs (a row written, inserted or
-    removed, a snapshot older than the locks, a tenant moved) throws `DependencyChangedException`. The write then
-    touches only what was decided: `revokeAll()` and `BoundaryService::removeAll()` delete exactly the decided rows by
-    key, and a row decided as held by a sync, or a boundary decided as removed, that is not there by the write throws
-    `DependencyChangedException` too. A conflicting try is rolled back and run again from the start
-    (`Administration\ConflictRetries`), up to `authorization.administration.retries` times (2 by default, validated at
-    boot), each try reading every record afresh rather than reusing a model the rolled-back try changed
-    (`Services\Support\RecordWriter`, `StoredRecords`). A PostgreSQL serialisation failure or deadlock, a MySQL
-    deadlock or lock wait timeout, a busy SQLite database, or Laravel's `DeadlockException` for one met in a nested
-    transaction, is tried again the same way when the operation opened the outermost transaction. Inside the
-    application's own transaction it is thrown as `Exceptions\TransactionConflictException` (SQLSTATE `40001`, the
-    database's error as its previous), since the database rolled the whole transaction back or needs it restarted,
-    which only the application can do; a changed dependency is tried again there only back to the operation's
-    savepoint, and on MySQL (repeatable read) a snapshot the application's transaction already took is kept across
-    that rollback, so the operation may conflict on every try. Once every try has conflicted, the call is refused with
-    `AuthorizationException` as `administration.conflict`, at the `administration` stage, recorded and reported as the
-    acting subject's refusal with `DecisionEvaluated` and `AuthorizationFailed`, as `check()` and `authorize()` record
-    one.
+    reads it and once under the lock, and every chain afresh; anything that differs (a row written, inserted or removed,
+    a snapshot older than the locks, a tenant moved) throws `DependencyChangedException`. The write then touches only
+    what was decided: `revokeAll()` and `BoundaryService::removeAll()` delete exactly the decided rows by key,
+    `revokeAll()` ends exactly the activations it locked and decided, and a row decided as held by a sync, or a boundary
+    decided as removed, that is not there by the write throws `DependencyChangedException` too. A conflicting try is
+    rolled back and run again from the start (`Administration\ConflictRetries`), up to
+    `authorization.administration.retries` times (2 by default, validated at boot), each try reading every record afresh
+    rather than reusing a model the rolled-back try changed (`Services\Support\RecordWriter`, `StoredRecords`). A
+    PostgreSQL serialisation failure or deadlock, a MySQL deadlock or lock wait timeout, a busy SQLite database, or
+    Laravel's `DeadlockException` for one met in a nested transaction, is tried again the same way when the operation
+    opened the outermost transaction. Inside the application's own transaction it is thrown as
+    `Exceptions\TransactionConflictException` (SQLSTATE `40001`, the database's error as its previous), since the
+    database rolled the whole transaction back or needs it restarted, which only the application can do; a changed
+    dependency is tried again there only back to the operation's savepoint, and on MySQL (repeatable read) a snapshot
+    the application's transaction already took is kept across that rollback, so the operation may conflict on every try.
+    Once every try has conflicted, the call is refused with `AuthorizationException` as `administration.conflict`, at
+    the `administration` stage, recorded and reported as the acting subject's refusal with `DecisionEvaluated` and
+    `AuthorizationFailed`, as `check()` and `authorize()` record one.
 
     Deadlocks are detected and retried, not prevented. The order holds within one operation, but two operations that
     cross can still deadlock: one's actor may be the other's target, or one's held role the other's granted role, so

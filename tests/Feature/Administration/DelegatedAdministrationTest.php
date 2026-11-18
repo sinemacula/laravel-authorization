@@ -459,7 +459,7 @@ final class DelegatedAdministrationTest extends TestCase
         ];
         yield 'revokeAll, nothing held' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->revokeAll(self::user(), $actor)),
-            [Actions::ROLE_REVOKE, Actions::PERMISSION_REVOKE, Actions::POLICY_DETACH, Actions::BOUNDARY_REMOVE],
+            [Actions::ROLE_REVOKE, Actions::PERMISSION_REVOKE, Actions::POLICY_DETACH, Actions::BOUNDARY_REMOVE, Actions::BREAK_GLASS_REVOKE],
         ];
         yield 'ResourcePolicyService::detachAll, nothing attached' => [
             self::directly(static fn (ActingContext $actor): mixed => self::resourcePolicies()->detachAll(['posts', 7], $actor)),

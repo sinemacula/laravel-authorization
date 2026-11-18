@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -44,9 +45,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * that names no model class is skipped and reported, so a missing morph map
  * entry never removes grants or boundaries.
  *
- * A break-glass activation that expired without ending is never removed: its
- * expiry is recorded on its row and reported with `BreakGlassExpired` (see
- * `ExpiredActivations`).
+ * A break-glass activation is never removed: one that expired without ending
+ * has its expiry recorded on its row and reported with `BreakGlassExpired` (see
+ * `ExpiredActivations`), and an unexpired one of a grantee that is gone is
+ * ended by `revokeAll()`, reported as revoked and counted among its grants.
  *
  * The inline policies of a grantee that no longer exists are deleted too, each
  * through the model so it is reported as deleted and its attachments go with
@@ -66,9 +68,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  *
  * Pretending counts exactly what a real run would remove, in the same order: an
  * expired grant once, among the expired, the boundaries of a grantee that is
- * gone, and its grants that are still live, with the attachments of its own
- * inline policies among them, since a real run revokes those before it deletes
- * the policies, then the attachments of each record that is gone.
+ * gone, and its grants and activations that are still live, with the
+ * attachments of its own inline policies among them, since a real run revokes
+ * those before it deletes the policies, then the attachments of each record
+ * that is gone.
  *
  * Pruning refuses while the package is not healthy (see `PackageState`), before
  * any row is read.
@@ -523,8 +526,8 @@ final readonly class GrantPruner
 
     /**
      * Count the grants of every kind the grantee holds, in every scope, that
-     * have not expired: a real run removes an expired one among the expired,
-     * before it revokes the grantee's grants.
+     * have not expired, and its activations not ended or expired: a real run
+     * removes an expired grant and records an expired activation first.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return int
@@ -532,6 +535,7 @@ final readonly class GrantPruner
     private static function countLiveGrants(Reference $grantee): int
     {
         $count = 0;
+        $table = TableNames::get('break_glass');
 
         foreach (GrantTarget::cases() as $kind) {
             $count += LiveGrants::only(AuthorizationConnection::connection()->table($kind->table()), $kind->table())
@@ -540,6 +544,10 @@ final readonly class GrantPruner
                 ->count();
         }
 
-        return $count;
+        $activations = AuthorizationConnection::connection()->table($table)
+            ->where('authorizable_type', $grantee->type)
+            ->where('authorizable_id', $grantee->id);
+
+        return $count + BreakGlassActivations::unexpired($activations, $table)->count();
     }
 }

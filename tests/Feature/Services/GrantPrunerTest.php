@@ -639,10 +639,10 @@ final class GrantPrunerTest extends TestCase
     }
 
     /**
-     * The activations of a grantee that no longer exists are never removed, nor
-     * counted among its grants: a live one is left as it is, and one that
-     * expired has its expiry recorded on its row, while the grantee's role
-     * grant is revoked.
+     * The activations of a grantee that no longer exists are never removed: a
+     * live one is ended as revoked with the grantee's role grant and counted
+     * among its grants, pretending too, and one that expired has its expiry
+     * recorded on its row.
      *
      * @return void
      *
@@ -662,14 +662,14 @@ final class GrantPrunerTest extends TestCase
 
         Event::fake();
 
-        self::assertSame([1, 1], [self::pruner()->prune(1000, true)->orphaned, self::pruner()->prune(1000, true)->activations]);
+        self::assertSame([2, 1], [self::pruner()->prune(1000, true)->orphaned, self::pruner()->prune(1000, true)->activations]);
 
         $result = self::pruner()->prune(1000);
 
-        self::assertSame([1, 1], [$result->orphaned, $result->activations]);
+        self::assertSame([2, 1], [$result->orphaned, $result->activations]);
         self::assertSame(0, DB::table('authorizable_roles')->count());
         self::assertSame(2, BreakGlassActivation::query()->count());
-        self::assertNull(BreakGlassActivation::query()->findOrFail($live->id)->ended_at);
+        self::assertSame('revoked', BreakGlassActivation::query()->findOrFail($live->id)->end_reason);
         self::assertSame('expired', BreakGlassActivation::query()->findOrFail($expired->id)->end_reason);
     }
 
