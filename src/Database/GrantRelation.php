@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Database;
 
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Query\Builder;
 
@@ -16,7 +17,8 @@ use Illuminate\Database\Query\Builder;
  * comparing a string column with an integer, so a stock relation over an
  * integer-keyed grantee fails there, and Laravel inlines integer keys into an
  * eager load as raw integers. This relation binds the key as a string, alone
- * and eager-loaded, on every database.
+ * and eager-loaded, and reads the grantee's key column as text in an existence
+ * query or count, on every database.
  *
  * Given the query of the rows to read in place of the grant table, the relation
  * joins those rows under the table's name, so every constraint on the table's
@@ -75,6 +77,28 @@ final class GrantRelation extends MorphToMany
 
         $this->whereInEager('whereIn', $this->getQualifiedForeignPivotKeyName(), $keys);
         $this->query->where($this->qualifyPivotColumn($this->morphType), $this->morphClass);
+    }
+
+    /**
+     * Constrain an existence query or count to the grants of the outer query's
+     * grantee, its key column read as text.
+     *
+     * The grantee's table is never the related table, so Laravel's self-join
+     * form is not needed.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<TRelatedModel>  $query
+     * @param  \Illuminate\Database\Eloquent\Builder<TDeclaringModel>  $parentQuery
+     * @param  mixed  $columns
+     * @return \Illuminate\Database\Eloquent\Builder<TRelatedModel>
+     */
+    #[\Override]
+    public function getRelationExistenceQuery(EloquentBuilder $query, EloquentBuilder $parentQuery, mixed $columns = ['*']): EloquentBuilder
+    {
+        $this->performJoin($query);
+
+        return $query->select($columns)
+            ->whereColumn(new KeyAsText($this->getQualifiedParentKeyName()), '=', $this->getExistenceCompareKey())
+            ->where($this->qualifyPivotColumn($this->morphType), $this->morphClass);
     }
 
     /**
