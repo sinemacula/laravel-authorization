@@ -295,6 +295,38 @@ final class ResolutionTiersTest extends TestCase
     }
 
     /**
+     * A stored entry past its until is not served while the store holds it.
+     *
+     * @return void
+     */
+    public function testALapsedEntryIsNotReadBack(): void
+    {
+        $this->tiers()->keep('permissions', self::grantee(), new Resolution(['posts:read'], 60), $this->pins(), true, null);
+        $this->repository->put(self::KEY, $this->stored(), 600);
+
+        Carbon::setTestNow(Carbon::now()->addSeconds(59));
+
+        $memo = new ResolutionMemo;
+
+        self::assertNull((new ResolutionTiers($memo, $this->store, 'authorization-test', 300, false, false))->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
+        self::assertNull($memo->get(self::MEMO_KEY));
+    }
+
+    /**
+     * An entry a bulk read found past its until is not served.
+     *
+     * @return void
+     */
+    public function testABulkReadSkipsALapsedEntry(): void
+    {
+        $found = [self::KEY => ['versions' => $this->pins()->tokens(), 'value' => ['posts:read'], 'until' => Carbon::now()->getTimestamp()]];
+        $memo  = new ResolutionMemo;
+
+        self::assertNull((new ResolutionTiers($memo, $this->store, 'authorization-test', 300, false, false))->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...), $found));
+        self::assertNull($memo->get(self::MEMO_KEY));
+    }
+
+    /**
      * An entry that cannot be read back is discarded, with a warning naming it,
      * and leaves the memo as it was.
      *
