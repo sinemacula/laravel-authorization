@@ -107,6 +107,32 @@ final class CheckContextFactoryTest extends TestCase
     }
 
     /**
+     * The authentication context's values for a namespace it does not claim are
+     * dropped, so it can neither overwrite what the caller passes nor stand in
+     * for an absent request or subject.
+     *
+     * @return void
+     */
+    public function testAnAuthenticationContextFillsOnlyTheNamespacesItClaims(): void
+    {
+        $context = (new CheckContextFactory(
+            $this->authentication([
+                'authentication' => ['guard' => 'web'],
+                'input'          => ['a' => 'forged'],
+                'request'        => ['ip' => '192.0.2.1'],
+                'subject'        => ['id' => 'forged'],
+            ], ['authentication']),
+            $this->request([]),
+            $this->environment([]),
+        ))->make(['a' => 1]);
+
+        self::assertSame([true, 'web'], $context->lookup('authentication.guard'));
+        self::assertSame([true, 1], $context->lookup('input.a'));
+        self::assertSame([false, null], $context->lookup('request'));
+        self::assertSame([false, null], $context->lookup('subject'));
+    }
+
+    /**
      * No source is read when the context is made, each is read the first time a
      * check reads one of its namespaces and once for the check, and the
      * authentication context once for every namespace it supplies.
