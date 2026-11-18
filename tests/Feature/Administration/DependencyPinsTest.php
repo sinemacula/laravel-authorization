@@ -430,6 +430,31 @@ final class DependencyPinsTest extends TestCase
     }
 
     /**
+     * Locking the actor empties the memo, so what the request memoised before
+     * the lock is read again from the rows.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testLockingTheActorEmptiesTheMemo(): void
+    {
+        $actor = StubGrantee::query()->create(['id' => 'admin']);
+
+        GrantService::instance()?->grantPermission($actor, Permission::query()->create(['name' => 'posts:read']));
+
+        self::assertTrue($actor->hasPermission('posts:read'));
+
+        DB::table('authorizable_permissions')->delete();
+
+        self::assertTrue($actor->hasPermission('posts:read'));
+
+        self::pins()->lockActor();
+
+        self::assertFalse($actor->hasPermission('posts:read'));
+    }
+
+    /**
      * A query is pinned as it was given: a caller that goes on to change its
      * own query never changes what is read again.
      *

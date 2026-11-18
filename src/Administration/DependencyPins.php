@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -99,7 +100,9 @@ final class DependencyPins
      * Lock the actor's authority, once: its principal's and identity's grant
      * rows, their roles and the chain above them, the boundaries, the
      * guardrails in the reach of the request's tenant, the resource policies of
-     * the operation type, and the permissions and policies all of those name.
+     * the operation type, and the permissions and policies all of those name;
+     * then empty the resolution cache's memo, so the decisions read what the
+     * locks hold, never what the request memoised before them.
      *
      * @return void
      *
@@ -120,6 +123,8 @@ final class DependencyPins
             ->tenants($tenant === null ? null : new Reference(...$tenant))
             ->resources(OperationResource::TYPE)
             ->lock();
+
+        ResolutionCache::instance()?->tenantChanged(true);
     }
 
     /**
