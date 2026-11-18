@@ -458,6 +458,25 @@ final class DependencyPinsTest extends TestCase
     }
 
     /**
+     * The actor is locked when no resolution cache is bound.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActorIsLockedWithoutAResolutionCache(): void
+    {
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        $pins = self::pins();
+
+        $pins->lockActor();
+
+        self::assertSame(DependencyPhase::ACTOR, $pins->phase());
+    }
+
+    /**
      * A query is pinned as it was given: a caller that goes on to change its
      * own query never changes what is read again.
      *
