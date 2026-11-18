@@ -16,9 +16,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondGrantee;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\TestCase;
 
@@ -35,7 +37,7 @@ use Tests\TestCase;
 #[CoversClass(SubjectGrants::class)]
 final class SubjectGrantsTest extends TestCase
 {
-    use ActivatesBreakGlass;
+    use ActivatesBreakGlass, AuthorizationAssertions;
 
     /**
      * A role or permission held by the principal or by its identity counts; one
@@ -139,6 +141,34 @@ final class SubjectGrantsTest extends TestCase
         self::assertSame(['account-cap'], $names(SubjectGrants::boundaries(new Subject($principal, $principal))));
         self::assertSame(['account-cap'], $names(SubjectGrants::boundaries(new Subject($principal))));
         self::assertSame([], SubjectGrants::boundaries(new Subject(new \stdClass)));
+    }
+
+    /**
+     * An identity's permission or role granted in a tenant reaches its
+     * principal only in that tenant, and its platform-wide grant everywhere.
+     *
+     * @return void
+     */
+    public function testAnIdentitysTenantGrantReachesThePrincipalOnlyInThatTenant(): void
+    {
+        [$tenant, $sibling] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['tenant-a', 'tenant-b']);
+
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
+
+        Role::create(['name' => 'publisher'])->givePermission(Permission::create(['name' => 'posts:publish']));
+
+        $identity->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
+        $identity->assignRole('publisher', null, $tenant);
+        $identity->givePermission(Permission::create(['name' => 'admin:read']));
+
+        foreach (['tenant' => [$tenant, true], 'sibling' => [$sibling, false], 'platform' => [null, false]] as $label => [$active, $reached]) {
+            $this->actingAsSubject(new Subject($principal, $identity, $active));
+
+            self::assertSame($reached, Authorization::can('posts:edit'), $label);
+            self::assertSame($reached, Authorization::can('posts:publish'), $label);
+            self::assertTrue(Authorization::can('admin:read'), $label);
+        }
     }
 
     /**
