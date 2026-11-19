@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
@@ -157,6 +158,63 @@ final class PreviewingTest extends TestCase
         }
 
         self::assertFalse($previews->isEvaluating());
+    }
+
+    /**
+     * A preview a listener builds while another is evaluated is admitted on its
+     * own, so a target its previewer may not preview is refused there, and a
+     * mutation is refused inside it and after it until the outer evaluation
+     * ends too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPreviewBuiltInsideAnotherIsAdmittedOnItsOwn(): void
+    {
+        $caller  = self::previewer();
+        $target  = self::target();
+        $other   = self::target('other');
+        $senior  = self::target('senior');
+        $grantee = StubGrantee::query()->create(['id' => 'grantee']);
+        $edit    = self::permission('posts:edit');
+        $grant   = static fn (): GrantOutcome => self::grants()->grantPermission($grantee, $edit);
+        $deny    = ['effect' => 'deny', 'actions' => [PackagePermissions::SUBJECT_PREVIEW], 'conditions' => ['eq' => ['resource.target_id' => 'senior']]];
+
+        self::attachStatements($caller, 'not-the-senior', [$deny]);
+
+        $manager = $this->signIn($caller);
+        $preview = $manager->previewFor($target);
+        /** @var \ArrayObject<string, mixed> $seen */
+        $seen = new \ArrayObject;
+
+        Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use ($manager, $other, $senior, $grant, $seen): void {
+            if ($event->previewer === null) {
+                return;
+            }
+
+            if ($event->subject?->id === 'other') {
+                $seen['inside'] = self::reasonOf($grant);
+
+                return;
+            }
+
+            $seen['nested']     = $manager->previewFor($other)->can('posts:read');
+            $seen['senior']     = self::reasonOf(static fn (): mixed => $manager->previewFor($senior));
+            $seen['after']      = self::reasonOf($grant);
+            $seen['evaluating'] = Previewing::current()->isEvaluating();
+        });
+
+        self::assertTrue($preview->can('posts:read'));
+        self::assertSame([
+            'inside'     => DecisionReason::ADMINISTRATION_PREVIEWING,
+            'nested'     => true,
+            'senior'     => DecisionReason::EXPLICIT_DENY,
+            'after'      => DecisionReason::ADMINISTRATION_PREVIEWING,
+            'evaluating' => true,
+        ], $seen->getArrayCopy());
+        self::assertFalse(Previewing::current()->isEvaluating());
+        self::assertSame(GrantOutcome::GRANTED, $grant());
     }
 
     /**
@@ -306,6 +364,23 @@ final class PreviewingTest extends TestCase
         self::assertSame(DecisionReason::ADMINISTRATION_PREVIEWING, $refusal->getReason());
         self::assertSame(DecisionStage::ADMINISTRATION, $refusal->getDecision()?->stage);
         self::assertSame('This action is unauthorized.', $refusal->getMessage());
+    }
+
+    /**
+     * Return the reason the callback is refused for, or null when it is not.
+     *
+     * @param  \Closure(): mixed  $callback
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function reasonOf(\Closure $callback): ?DecisionReason
+    {
+        try {
+            $callback();
+        } catch (AuthorizationException $exception) {
+            return $exception->getReason();
+        }
+
+        return null;
     }
 
     /**

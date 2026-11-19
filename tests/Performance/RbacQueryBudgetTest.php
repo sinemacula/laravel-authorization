@@ -4,8 +4,11 @@ declare(strict_types = 1);
 
 namespace Tests\Performance;
 
+use Illuminate\Cache\Events\RetrievingKey;
+use Illuminate\Cache\Events\RetrievingManyKeys;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -25,6 +28,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -59,6 +63,8 @@ use Tests\TestCase;
 #[CoversClass(ResolutionCache::class)]
 final class RbacQueryBudgetTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /** @var list<string> Permission fixture reused across every assertion. */
     private const array PERMISSION_NAMES = [
         'posts:create',
@@ -195,14 +201,8 @@ final class RbacQueryBudgetTest extends TestCase
 
         $this->app?->make(GuardrailService::class)->set(self::policy('guardrail', 'allow', '*'), null, ActingContext::for($actor));
 
-        $check = function (StubGrantee $user): void {
-            $manager = $this->app?->make(AuthorizationManager::class);
-
-            self::assertTrue($manager?->for($user)->can('chain-' . Reference::of($user)->id . '-0-0:read'));
-        };
-
-        $shallowQueries = $this->coldQueries(self::identityHolding(roles: 1, depth: 1), $check);
-        $deepQueries    = $this->coldQueries(self::identityHolding(roles: 4, depth: 4), $check);
+        $shallowQueries = $this->coldQueries(self::identityHolding(roles: 1, depth: 1), $this->checkChain(...));
+        $deepQueries    = $this->coldQueries(self::identityHolding(roles: 4, depth: 4), $this->checkChain(...));
 
         self::assertLessThanOrEqual(13, \count($deepQueries), "A cold check exceeded its 13-query budget:\n" . \implode("\n", $deepQueries));
         self::assertCount(\count($shallowQueries), $deepQueries, "A cold check grew with the number of roles or the depth of the hierarchy:\n" . \implode("\n", $deepQueries));
@@ -274,6 +274,142 @@ final class RbacQueryBudgetTest extends TestCase
     }
 
     /**
+     * A check in a fresh request, after a warm one wrote the persistent store,
+     * runs no query, and reads the store as often for four roles four levels
+     * deep as for one role one level deep, as does a cold check once the
+     * entries expire and their version tokens remain.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFreshRequestReadsTheWarmStoreWithoutQueriesOrGrowingRoundTrips(): void
+    {
+        /** @var \ArrayObject<int, object> $reads */
+        $reads = new \ArrayObject;
+
+        Event::listen([RetrievingKey::class, RetrievingManyKeys::class], static function (object $event) use ($reads): void {
+            $reads[] = $event;
+        });
+
+        $warm = [];
+        $cold = [];
+
+        foreach ([[1, 1], [4, 4]] as [$roles, $depth]) {
+            $user = self::identityHolding($roles, $depth);
+
+            $this->coldQueries($user, $this->checkChain(...));
+
+            $reads->exchangeArray([]);
+
+            self::assertSame([], $this->freshRequestQueries($user, $this->checkChain(...)), 'A check served by the warm store hit the database.');
+
+            $warm[] = \count($reads);
+
+            $this->travel(301)->seconds();
+            $reads->exchangeArray([]);
+
+            self::assertNotSame([], $this->freshRequestQueries($user, $this->checkChain(...)), 'An expired entry was served.');
+
+            $cold[] = \count($reads);
+        }
+
+        self::assertGreaterThan(0, $warm[0], 'The fresh request did not read the store.');
+        self::assertSame($warm[0], $warm[1], 'Warm store round trips grew with the number of roles or the depth of the hierarchy.');
+        self::assertSame($cold[0], $cold[1], 'Cold store round trips grew with the number of roles or the depth of the hierarchy.');
+    }
+
+    /**
+     * Cold checks in a tenant three levels below the organisation, with a
+     * permission, a role and a policy granted at each of three ancestors, run
+     * as many queries as in a tenant one level below it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testColdCheckQueriesDoNotGrowWithTenantDepth(): void
+    {
+        $create                           = static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]);
+        [$org, $account, $team, $project] = \array_map($create, ['org', 'account', 'team', 'project']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($account), Reference::of($org))
+            ->put(Reference::of($team), Reference::of($account))
+            ->put(Reference::of($project), Reference::of($team)));
+
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
+
+        foreach ([$org, $account, $team] as $tenant) {
+            $id   = Reference::of($tenant)->id;
+            $role = Role::create(['name' => "role-{$id}", 'guard' => 'web']);
+
+            $role->permissions()->attach(Permission::create(['name' => "{$id}:update", 'guard' => 'web'])->getKey());
+
+            $user->givePermission(Permission::create(['name' => "{$id}:read", 'guard' => 'web']), null, $tenant);
+            $user->assignRole($role, null, $tenant);
+            $user->attachPolicy(self::policy("policy-{$id}", 'allow', "{$id}:write"), null, $tenant);
+        }
+
+        $checkIn = fn (StubTenant $tenant, string $nearest): \Closure => function (StubGrantee $fresh) use ($tenant, $nearest): void {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($fresh, $tenant));
+
+            Authorization::clearResolvedInstance('authorization');
+
+            foreach (['org:read', "{$nearest}:read", "{$nearest}:update", "{$nearest}:write"] as $action) {
+                self::assertTrue(Authorization::can($action), $action);
+            }
+        };
+
+        $shallowQueries = $this->coldQueries($user, $checkIn($account, 'account'));
+        $deepQueries    = $this->coldQueries($user, $checkIn($project, 'team'));
+
+        self::assertCount(\count($shallowQueries), $deepQueries, "A cold check grew with the depth of its tenant:\n" . \implode("\n", $deepQueries));
+    }
+
+    /**
+     * A cold check followed by a warm one runs as many queries with break-glass
+     * on, with or without live activations, as with it off, and the warm one
+     * sees the emergency permission only once it is activated.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBreakGlassAddsNoQueryPerRoleOrActivation(): void
+    {
+        $user       = self::identityHolding(roles: 4, depth: 4);
+        $roles      = [self::emergencyRole('posts:create'), self::emergencyRole('posts:update', 'oncall')];
+        $checkTwice = fn (bool $isActivated): \Closure => function (StubGrantee $fresh) use ($isActivated): void {
+            $this->checkChain($fresh);
+
+            self::assertSame($isActivated, $this->app?->make(AuthorizationManager::class)->for($fresh)->can('posts:create'));
+        };
+
+        $offQueries = $this->coldQueries($user, $checkTwice(false));
+
+        self::switchBreakGlass(true, ['roles' => ['responder' => [], 'oncall' => []]]);
+
+        $onQueries = $this->coldQueries($user, $checkTwice(false));
+
+        foreach ($roles as $role) {
+            self::activate($user, $role);
+        }
+
+        $activeQueries = $this->coldQueries($user, $checkTwice(true));
+
+        self::assertCount(\count($offQueries), $onQueries, "Break-glass added a query:\n" . \implode("\n", $onQueries));
+        self::assertCount(\count($offQueries), $activeQueries, "Live activations added a query:\n" . \implode("\n", $activeQueries));
+    }
+
+    /**
+     * Keep break-glass off unless a test switches it on.
+     *
+     * @return void
+     */
+    protected function setUpActivatesBreakGlass(): void {}
+
+    /**
      * Create an identity holding the given number of roles, each at the bottom
      * of its own chain of the given depth with a permission and a policy at
      * every level, and a policy and a boundary of its own.
@@ -335,10 +471,24 @@ final class RbacQueryBudgetTest extends TestCase
      */
     private function coldQueries(StubGrantee $user, \Closure $run): array
     {
+        $this->app?->make('cache')->store('array')->clear();
+
+        return $this->freshRequestQueries($user, $run);
+    }
+
+    /**
+     * Return the queries the callback runs on a fresh copy of the identity in a
+     * fresh request, which keeps what the persistent store holds.
+     *
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @param  \Closure(\Tests\Feature\Stubs\StubGrantee): mixed  $run
+     * @return list<string>
+     */
+    private function freshRequestQueries(StubGrantee $user, \Closure $run): array
+    {
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $app->make('cache')->store('array')->clear();
         $app->forgetScopedInstances();
 
         $fresh = StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
@@ -354,6 +504,19 @@ final class RbacQueryBudgetTest extends TestCase
         DB::disableQueryLog();
 
         return $queries;
+    }
+
+    /**
+     * Check the read of the user's first chain's bottom role, which it holds.
+     *
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @return void
+     */
+    private function checkChain(StubGrantee $user): void
+    {
+        $manager = $this->app?->make(AuthorizationManager::class);
+
+        self::assertTrue($manager?->for($user)->can('chain-' . Reference::of($user)->id . '-0-0:read'));
     }
 
     /**
