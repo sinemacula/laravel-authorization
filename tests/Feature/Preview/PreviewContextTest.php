@@ -7,6 +7,7 @@ namespace Tests\Feature\Preview;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
@@ -304,6 +305,37 @@ final class PreviewContextTest extends TestCase
             self::assertSame($caller, $subject->subject);
             self::assertSame('session-1', $subject->session);
         }
+    }
+
+    /**
+     * A caller previewing its own resolved subject previews a copy without its
+     * session, so its step-up admits the preview but never meets the
+     * requirement it answers for itself, and its own subject is not taken for a
+     * target, so it still builds acting contexts afterwards.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testACallerPreviewingItselfIsAnsweredWithoutItsSession(): void
+    {
+        $caller = self::previewer('previewer', false);
+
+        self::attachStatements($caller, 'stepped-up', [self::requiring(PackagePermissions::SUBJECT_PREVIEW), self::requiring('reports:export')]);
+
+        $manager = $this->signIn($caller, 'session-1', null, null, new StubRequirementChecker(RequirementResult::met()));
+        $own     = $manager->currentSubject();
+
+        self::assertInstanceOf(Subject::class, $own);
+
+        $preview = $manager->previewFor($own);
+
+        self::assertNull($preview->currentSubject()?->session);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $preview->check('reports:export')->reason);
+        self::assertTrue($manager->can('reports:export'));
+        self::assertSame('session-1', $manager->currentSubject()?->session);
+        self::assertSame($own, ActingContext::for($own)->subject);
+        self::assertSame($caller, ActingContext::current()->subject->subject);
     }
 
     /**

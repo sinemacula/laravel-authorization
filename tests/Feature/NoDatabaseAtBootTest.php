@@ -6,21 +6,27 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Orchestra\Testbench\Attributes\DefineEnvironment;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingPermissionProvider;
+use Tests\Feature\Stubs\RecordingResourceAttributes;
+use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 
 /**
- * Booting the provider never queries or writes the database.
+ * Registering and booting the provider never queries or writes the database.
  *
  * The application boots on an empty in-memory database with no package tables,
- * a permission enum and a permission provider configured, as `config:cache`,
- * `route:cache` and `migrate` boot it on a fresh deployment. Booting succeeds,
- * runs no query and never reads the provider.
+ * a permission enum and a permission provider configured, and every optional
+ * feature too in one case, as `config:cache`, `route:cache` and `migrate` boot
+ * it on a fresh deployment. Booting succeeds and runs no query.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,39 +41,60 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
      * query and never reads the provider.
      *
      * @return void
-     *
-     * @throws \LogicException
      */
     public function testBootRunsNoQueryWithoutTables(): void
     {
-        $queries = [];
-
-        Event::listen(QueryExecuted::class, static function (QueryExecuted $query) use (&$queries): void {
-            $queries[] = $query->sql;
-        });
-
-        (new AuthorizationServiceProvider($this->app ?? throw new \LogicException('The application has not been created.')))->boot();
-
-        self::assertSame([], $queries);
+        self::assertSame([], $this->queriesRegisteringThePackage());
         self::assertSame(0, RecordingPermissionProvider::$reads);
         self::assertFalse(Schema::hasTable('permissions'));
     }
 
     /**
-     * Register the package service provider.
+     * Booting with every optional feature configured, on a connection of its
+     * own, and no package tables, runs no query, the database cache included.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('configureEveryFeature')]
+    public function testBootWithEveryFeatureConfiguredRunsNoQuery(): void
+    {
+        Schema::create('cache', static function (Blueprint $table): void {
+            $table->string('key')->primary();
+            $table->mediumText('value');
+            $table->integer('expiration');
+        });
+
+        self::assertSame([], $this->queriesRegisteringThePackage());
+        self::assertFalse(Schema::hasTable('permissions'));
+    }
+
+    /**
+     * Configure usage tracking, break-glass, a database cache, session scopes,
+     * sensitive actions, attribute providers, a context source and a connection
+     * of the package's own.
      *
      * @param  mixed  $app
-     * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>
+     * @return void
      */
-    #[\Override]
-    protected function getPackageProviders(mixed $app): array
+    protected function configureEveryFeature(mixed $app): void
     {
-        return [AuthorizationServiceProvider::class];
+        /** @var \Illuminate\Config\Repository $config */
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.authorization', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+        $config->set('authorization.connection', 'authorization');
+        $config->set('authorization.cache.store', 'database');
+        $config->set('authorization.usage', ['enabled' => true, 'connection' => 'sync', 'queue' => 'usage']);
+        $config->set('authorization.break_glass', ['enabled' => true, 'roles' => ['responder' => ['max_minutes' => 30]], 'justifications' => ['incident'], 'notes' => true]);
+        $config->set('authorization.session', ['source' => StubSessionPolicySource::class, 'scopes' => ['editor' => ['posts:create']]]);
+        $config->set('authorization.events.decisions.sensitive_actions', ['posts:delete']);
+        $config->set('authorization.attributes', ['resources' => ['post' => RecordingResourceAttributes::class], 'subjects' => ['user' => RecordingSubjectAttributes::class]]);
+        $config->set('authorization.context.sources', [PlanContextSource::class]);
     }
 
     /**
      * Use an empty in-memory database, whatever the suite's driver, and
-     * configure an enum and a provider before the application boots.
+     * configure an enum and a provider before the package registers.
      *
      * @param  mixed  $app
      * @return void
@@ -84,5 +111,26 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
         $config->set('authorization.permission_providers', [RecordingPermissionProvider::class]);
 
         RecordingPermissionProvider::$reads = 0;
+    }
+
+    /**
+     * Register and boot the package and return every query that ran meanwhile.
+     *
+     * @return list<string>
+     *
+     * @throws \LogicException
+     */
+    private function queriesRegisteringThePackage(): array
+    {
+        $app     = $this->app ?? throw new \LogicException('The application has not been created.');
+        $queries = [];
+
+        Event::listen(QueryExecuted::class, static function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        $app->register(AuthorizationServiceProvider::class);
+
+        return $queries;
     }
 }

@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -324,6 +325,33 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame('admin', TenantScope::currentApplication());
         self::assertSame('admin', $this->app?->make(ResolvedTenant::class)->guard);
+    }
+
+    /**
+     * A check after the default guard changes decides on the new application's
+     * grants, though an earlier check warmed the memo for the same user.
+     *
+     * @return void
+     */
+    public function testAChangeOfDefaultGuardDecidesOnTheNewApplicationsGrants(): void
+    {
+        config()->set('auth.guards.api', ['driver' => 'session', 'provider' => 'users']);
+
+        $user = AuthenticatableGrantee::create(['id' => 'user-1']);
+
+        $this->actingAs($user, 'web');
+
+        Permission::create(['name' => 'posts:create']);
+        Permission::create(['name' => 'posts:delete']);
+        $user->givePermission('posts:create', application: 'web')->givePermission('posts:delete', application: 'api');
+
+        self::assertTrue(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::can('posts:delete'));
+
+        $this->actingAs($user, 'api');
+
+        self::assertFalse(Authorization::can('posts:create'));
+        self::assertTrue(Authorization::can('posts:delete'));
     }
 
     /**
