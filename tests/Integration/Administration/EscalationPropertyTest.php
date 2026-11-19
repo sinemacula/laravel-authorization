@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
@@ -71,6 +72,11 @@ use Tests\TestCase;
  * replayed alone may refuse every operation it makes, as a scenario whose
  * escalation is now refused does.
  *
+ * Each scenario is also run twice, without a persistent store and with one that
+ * earlier requests have read through, and every operation must commit in both
+ * or be refused in both for the same reason, leaving each subject the same
+ * permissions.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -121,6 +127,26 @@ final class EscalationPropertyTest extends TestCase
     }
 
     /**
+     * A warm persistent store leaves every operation's outcome, and what each
+     * subject may then do, as the database alone decides them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWarmStoreDecidesAsTheDatabaseDoes(): void
+    {
+        [$seed, $runs] = self::seeding();
+
+        for ($run = 0; $run < $runs; $run++) {
+            $cold = $this->inScenario($seed + $run, $this->outcomes(...));
+            $warm = $this->inScenario($seed + $run, $this->outcomes(...), 'array');
+
+            self::assertSame($cold, $warm, 'A warm store changed what an operation decided; seed ' . ($seed + $run) . '.');
+        }
+    }
+
+    /**
      * Make the operation and assert the property of its outcome, returning 1
      * when it committed and 0 when it was refused.
      *
@@ -167,6 +193,39 @@ final class EscalationPropertyTest extends TestCase
         }
 
         return 1;
+    }
+
+    /**
+     * Build the scenario and make its operations, each after a request has
+     * listed every subject's permissions, and return whether each committed, or
+     * what refused it, and what every subject may do after them.
+     *
+     * @param  \Tests\Integration\Administration\EscalationScenario  $scenario
+     * @return array{list<string>, array<string, array<string, list<string>>>}
+     *
+     * @throws \Throwable
+     */
+    private function outcomes(EscalationScenario $scenario): array
+    {
+        $scenario->build();
+
+        $outcomes = [];
+
+        for ($index = 0; $index < self::OPERATIONS; $index++) {
+            [$description, , , $call] = $scenario->operation();
+
+            $this->listings($scenario);
+            $this->forgetState();
+
+            $refusal    = self::refusalOf($call);
+            $outcomes[] = $description . match (true) {
+                $refusal === null                          => ' committed',
+                $refusal instanceof AuthorizationException => ' refused for ' . $refusal->getReason()->value,
+                default                                    => ' refused by ' . $refusal::class,
+            };
+        }
+
+        return [$outcomes, $this->listings($scenario)];
     }
 
     /**
@@ -372,21 +431,27 @@ final class EscalationPropertyTest extends TestCase
 
     /**
      * Run the scenario of the seed in a transaction of its own, rolled back
-     * after it, with the state the package keeps for a request forgotten.
+     * after it, with the state the package keeps for a request forgotten, and
+     * entries kept in the persistent store named, an empty one, if any.
+     *
+     * @template TResult
      *
      * @param  int  $seed
-     * @param  \Closure(\Tests\Integration\Administration\EscalationScenario): int  $run
-     * @return int
+     * @param  \Closure(\Tests\Integration\Administration\EscalationScenario): TResult  $run
+     * @param  string|null  $store
+     * @return TResult
      *
      * @throws \PHPUnit\Framework\AssertionFailedError
      * @throws \RuntimeException
      */
-    private function inScenario(int $seed, \Closure $run): int
+    private function inScenario(int $seed, \Closure $run, ?string $store = null): mixed
     {
         /** @var \Illuminate\Foundation\Application $app */
         $app    = $this->app;
         $config = $app->make(ConfigRepository::class);
 
+        $config->set('authorization.cache.store', $store);
+        $app->make('cache')->store('array')->clear();
         $this->forgetState();
 
         DB::beginTransaction();

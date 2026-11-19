@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Services;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,7 @@ use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\DeclaresPermissions;
+use Tests\Concerns\RacesAnotherSession;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -78,8 +80,11 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
-        ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
+        ComparesReferences, DeclaresPermissions, RacesAnotherSession, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
         RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection;
+
+    /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
+    private const array RACED = ['testAParentCommittedMeanwhileThatClosesACycleIsRefused'];
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -781,6 +786,31 @@ final class RoleServiceTest extends TestCase
         }
 
         self::assertNull($root->fresh()?->parent_id);
+    }
+
+    /**
+     * A parent another session commits after a parent change first reads, the
+     * two closing a cycle, is seen by the change's ancestor walk, so the change
+     * is refused and no cycle is stored (MySQL and PostgreSQL).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAParentCommittedMeanwhileThatClosesACycleIsRefused(): void
+    {
+        $this->raceOrSkip(['roles'], static function (): void {
+            $first  = self::role('first');
+            $second = self::role('second');
+
+            $refusal = self::refusalOf(static fn (): mixed => self::afterFirstRead(
+                static fn (): Role => self::service()->setParent('second', 'first'),
+                static fn (Connection $other): int => $other->table('roles')->where('id', $first->id)->update(['parent_id' => $second->id]),
+            ));
+
+            self::assertInstanceOf(RoleHierarchyCycleException::class, $refusal);
+            self::assertSame([$second->id, null], [$first->fresh()?->parent_id, $second->fresh()?->parent_id]);
+        });
     }
 
     /**
@@ -1593,6 +1623,23 @@ final class RoleServiceTest extends TestCase
             'revokePermission' => static fn () => $service->revokePermission($role, 'posts:read'),
             'syncPermissions'  => static fn () => $service->syncPermissions($role, ['posts:read']),
         ]);
+    }
+
+    /**
+     * Run the races outside the test's transaction, so a call sees what another
+     * session commits; SQLite, which skips them, keeps its transaction.
+     *
+     * @return list<string|null>
+     */
+    #[\Override]
+    protected function connectionsToTransact(): array
+    {
+        $isRaced = \in_array($this->name(), self::RACED, true) && DB::connection()->getDriverName() !== 'sqlite';
+
+        /** @var list<string|null> $connections */
+        $connections = parent::connectionsToTransact();
+
+        return $isRaced ? [] : $connections;
     }
 
     /**

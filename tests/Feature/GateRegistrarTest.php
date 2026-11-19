@@ -16,6 +16,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
@@ -27,6 +28,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -34,12 +36,15 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AllowingLaravelPolicy;
 use Tests\Feature\Stubs\AuthenticatableGrantee;
+use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\DenyingLaravelPolicy;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
@@ -76,7 +81,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class GateRegistrarTest extends TestCase
 {
-    use ReadsDispatchedEvents, ReportsEveryDecision;
+    use CatchesRefusals, ReadsDispatchedEvents, ReportsEveryDecision;
 
     /**
      * Boot the provider with the demo permission enum so the Gate asks the
@@ -114,6 +119,8 @@ final class GateRegistrarTest extends TestCase
     protected function tearDown(): void
     {
         Relation::morphMap([], false);
+
+        ConfigurablePermissionProvider::$permissions = [];
 
         parent::tearDown();
     }
@@ -765,6 +772,76 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::allows('posts:delete'));
         self::assertTrue(Gate::allows('posts:create'));
         self::assertSame(['posts:create'], $this->evaluatedActions());
+    }
+
+    /**
+     * An application's `Gate::after` runs once the hook has answered, so it
+     * cannot turn the package's allow into a deny or its deny into an allow.
+     *
+     * @return void
+     */
+    public function testAnAfterCallbackDoesNotOverrideTheAnswer(): void
+    {
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::after(static fn (?object $user, string $ability): bool => $ability === 'posts:delete');
+
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertFalse(Gate::allows('posts:delete'));
+    }
+
+    /**
+     * An `insufficient_authentication` denial is a plain deny through the Gate:
+     * false from `allows()`, with no code, and Laravel's own exception, which
+     * renders as a 403, from `authorize()` and the `can:` middleware, never the
+     * package's step-up exception.
+     *
+     * @return void
+     */
+    public function testInsufficientAuthenticationIsAPlainDenyThroughTheGate(): void
+    {
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
+
+        $user->attachPolicy(Policy::create(['name' => 'step-up', 'document' => ['statements' => [[
+            'effect'     => 'allow',
+            'actions'    => ['posts:create'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]],
+        ]]]]));
+
+        $this->actAs($user);
+
+        Route::middleware('can:posts:create')->get('/posts', static fn (): string => 'ok');
+
+        self::assertFalse(Gate::allows('posts:create'));
+        self::assertNull(Gate::inspect('posts:create')->code());
+        self::assertSame(LaravelAuthorizationException::class, self::refusalOf(static fn () => Gate::authorize('posts:create'))::class);
+        $this->get('/posts')->assertForbidden();
+        self::assertSame(
+            \array_fill(0, 4, DecisionReason::INSUFFICIENT_AUTHENTICATION),
+            \array_map(static fn (DecisionEvaluated $decision): ?DecisionReason => $decision->reason, $this->decisions()),
+        );
+    }
+
+    /**
+     * A catalogue declaration that breaks the name rules makes the first Gate
+     * check throw, for an ability the application defines too, rather than
+     * leaving the Gate to decide it.
+     *
+     * @return void
+     */
+    public function testAMalformedCatalogueMakesTheGateCheckThrow(): void
+    {
+        config(['authorization.permission_providers' => [ConfigurablePermissionProvider::class]]);
+
+        ConfigurablePermissionProvider::$permissions = [new PermissionDefinition('media[upload]')];
+
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('reports:view', static fn (?object $user = null): bool => true);
+
+        $this->expectException(InvalidPermissionCatalogueException::class);
+
+        Gate::allows('reports:view');
     }
 
     /**
