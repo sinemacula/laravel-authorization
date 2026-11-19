@@ -68,9 +68,12 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * A role's grant of a permission may carry an expiry, after which it no longer
  * counts. Granting a permission the role carries with the same expiry changes
  * nothing, and a concurrent duplicate never surfaces a unique-constraint
- * violation. The role and role permission events are dispatched once the write
- * commits, on the package's connection, and only for a write that changed
- * something.
+ * violation. A permission, or a role, deleted before or while the permission is
+ * granted is refused with `InvalidGrantTargetException` on every driver, and a
+ * grant whose row a concurrent change kept from being written with
+ * `UnwrittenGrantException`; either rolls the call back. The role and role
+ * permission events are dispatched once the write commits, on the package's
+ * connection, and only for a write that changed something.
  *
  * A permission is granted, or listed by a sync, only when its name covers a
  * declared permission (see `Support\DeclaredPermissions`), else the call throws
@@ -322,7 +325,7 @@ final class RoleService
 
             $model->unsetRelation('permissions');
 
-            $change = (new RolePermissionTable($model))->grant($target->id, $expiresAt);
+            $change = StoredRecords::written((new RolePermissionTable($model))->grant($target->id, $expiresAt), 'permission', $target, $model);
 
             $model->dispatchRelationChange('permission-change', ...self::changeEvents($operation, $model, $target, $change, $expiresAt));
 
@@ -440,7 +443,7 @@ final class RoleService
             $model->permissions()->detach($revoked);
 
             foreach ($desired as $target) {
-                $change = $table->rearm($target->id, $expiresAt, $now);
+                $change = StoredRecords::written($table->rearm($target->id, $expiresAt, $now), 'permission', $target, $model);
                 $events = [...$events, ...self::changeEvents($operation, $model, $target, $change, $expiresAt)];
 
                 // A permission decided as carried live is never written back:

@@ -151,7 +151,9 @@ $grants->revokeRole($user, 'editor', actor: ActingContext::current()); // 1, the
 ```
 
 Grants are idempotent: granting what the grantee holds, with the same expiry, changes nothing, dispatches no event and
-returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
+returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. A role,
+permission or policy deleted before or while it is granted is refused with `InvalidGrantTargetException`, and a grant a
+concurrent change kept from being written with `UnwrittenGrantException`, which is safe to retry. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
 none, and leaves a live one as it is, unless it is a role listed with a reach of its own and held with the other (see
