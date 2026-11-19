@@ -14,6 +14,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -134,6 +135,31 @@ final class MiddlewareBudgetTest extends TestCase
     }
 
     /**
+     * A bare guard costs the one ambiguity lookup more than `guard=`, and
+     * listing three role names reads the roles no more often than one.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testRequireRoleReadsTheRolesOnceWhateverTheNamesListed(): void
+    {
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
+
+        $user->assignRole(Role::create(['name' => 'owner', 'guard' => 'web']));
+
+        $one   = $this->admitQueries($user, 'owner', 'guard=web');
+        $three = $this->admitQueries($user, 'admin|editor|owner', 'guard=web');
+        $bare  = $this->admitQueries($user, 'admin|editor|owner', 'web');
+
+        self::assertCount(1, $one, "Admitting one role name did not read the roles once:\n" . \implode("\n", $one));
+        self::assertCount(\count($one), $three, "Listing several role names added a read:\n" . \implode("\n", $three));
+        self::assertCount(\count($three) + 1, $bare, "A bare guard did not cost exactly one lookup more:\n" . \implode("\n", $bare));
+    }
+
+    /**
      * Admitting a bound model of the subject's tenant through `AuthorizeAction`
      * reads at most six queries: the grants a resource-less admit reads and the
      * policies attached to the model. Resolving the model's tenant from its
@@ -223,5 +249,38 @@ final class MiddlewareBudgetTest extends TestCase
         $app->instance(SubjectResolver::class, $resolver);
         $app->forgetInstance('authorization');
         $app->forgetInstance(AuthorizationManager::class);
+    }
+
+    /**
+     * Return the queries one admitting `RequireRole` call runs for a fresh copy
+     * of the user in a fresh request.
+     *
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @param  string  $names
+     * @param  string  $guard
+     * @return list<string>
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    private function admitQueries(StubGrantee $user, string $names, string $guard): array
+    {
+        $this->app?->forgetScopedInstances();
+        $this->actAs(StubGrantee::query()->whereKey($user->getKey())->firstOrFail());
+
+        Authorization::clearResolvedInstance('authorization');
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        (new RequireRole)->handle(Request::create('/budget', 'GET'), static fn (): Response => new Response('ok', 200), $names, $guard);
+
+        /** @var list<string> $queries */
+        $queries = \array_column(DB::getQueryLog(), 'query');
+
+        DB::disableQueryLog();
+
+        return $queries;
     }
 }

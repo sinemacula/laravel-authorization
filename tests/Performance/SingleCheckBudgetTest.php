@@ -4,9 +4,12 @@ declare(strict_types = 1);
 
 namespace Tests\Performance;
 
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionReporting;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use Tests\Concerns\MeasuresTime;
@@ -30,6 +33,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(CheckBatch::class)]
+#[CoversClass(DecisionReporting::class)]
 final class SingleCheckBudgetTest extends TestCase
 {
     use MeasuresTime;
@@ -64,5 +68,38 @@ final class SingleCheckBudgetTest extends TestCase
 
             $this->assertWithinBudget(0.5, $elapsed, "Single check budget exceeded ({$elapsed}s for 1,000 checks).");
         }
+    }
+
+    /**
+     * 1,000 warm denied checks, each reported by `DecisionEvaluated` as denial
+     * events are by default, must complete in under 500ms.
+     *
+     * @return void
+     */
+    public function testAWarmDenialReportedByItsEventStaysWithinTheBudget(): void
+    {
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user));
+
+        $reported = 0;
+
+        Event::listen(DecisionEvaluated::class, static function () use (&$reported): void {
+            $reported++;
+        });
+
+        self::assertFalse(Authorization::check('posts:delete')->isAllowed());
+
+        $elapsed = $this->fastestOf(3, static function (): void {
+            for ($i = 0; $i < 1000; $i++) {
+                Authorization::check('posts:delete');
+            }
+        });
+
+        self::assertSame(3001, $reported);
+
+        $this->assertWithinBudget(0.5, $elapsed, "Warm denial budget exceeded ({$elapsed}s for 1,000 checks).");
     }
 }
