@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -176,6 +178,38 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         self::assertTrue($decision->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertEquals([new StatementReference('fixed', 0)], $decision->statements);
+    }
+
+    /**
+     * A bound policy store is asked on every check, so a change to its answer
+     * is seen by the next check, in the same request and the next, with a warm
+     * cache.
+     *
+     * @return void
+     */
+    public function testABoundPolicyStoreIsAskedOnEveryCheck(): void
+    {
+        config(['authorization.cache.store' => 'array']);
+
+        $store    = new StubPolicyStore;
+        $user     = StubGrantee::create(['id' => (string) Str::uuid()]);
+        $allowing = static fn (string $action): array => [EvaluationPolicy::fromArray(['name' => 'flagged', 'statements' => [['effect' => 'allow', 'actions' => [$action]]]])];
+
+        $this->container()->instance(PolicyStore::class, $store);
+        $this->container()->forgetInstance(PolicyResolver::class);
+
+        $store->policies = $allowing('reports:export');
+
+        self::assertTrue(Authorization::for($user)->can('reports:export'));
+
+        $store->policies = [];
+
+        self::assertFalse(Authorization::for($user)->can('reports:export'));
+
+        $this->container()->forgetInstance(ResolutionCache::class);
+        $store->policies = $allowing('reports:import');
+
+        self::assertTrue(Authorization::for($user)->can('reports:import'));
     }
 
     /**

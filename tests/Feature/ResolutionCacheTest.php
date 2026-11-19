@@ -432,6 +432,25 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A grantee bumped by another worker while its resolution reads leaves the
+     * entry pinned to the version before, so the next request resolves again.
+     *
+     * @return void
+     */
+    public function testAGranteeBumpedWhileResolvingIsNotServedAgain(): void
+    {
+        $this->request()->rememberPermissions(self::grantee(), function (): Resolution {
+            $this->versions()->bump([$this->versions()->granteeKey(self::grantee())]);
+
+            return $this->resolve(['posts:read']);
+        });
+
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
      * An entry holds while the versions of the roles it pinned are unchanged:
      * bumping an unrelated role leaves it, bumping one it pinned ends it.
      *
@@ -813,6 +832,21 @@ final class ResolutionCacheTest extends TestCase
         $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
 
         $this->request()->invalidate($keys);
+    }
+
+    /**
+     * A tree change the store fails to record is thrown, so the caller can
+     * retry.
+     *
+     * @return void
+     */
+    public function testATreeChangeTheStoreFailsToRecordIsThrown(): void
+    {
+        $this->store = new Repository(new FailingCacheStore);
+
+        $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
+
+        $this->request()->treeChanged(new Reference('stub_tenant', 'org'));
     }
 
     /**
