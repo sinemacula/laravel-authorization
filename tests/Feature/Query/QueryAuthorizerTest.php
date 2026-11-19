@@ -303,7 +303,7 @@ final class QueryAuthorizerTest extends TestCase
     /**
      * When a statement the check weighs matches a pattern against each row's
      * identifier, a row whose identifier is too long for `fnmatch()` is left
-     * out, as `check()` throws on it; with no pattern to match, it is kept.
+     * out, as `check()` denies it; with no pattern to match, it is kept.
      *
      * @return void
      */

@@ -613,6 +613,53 @@ final class StatementTest extends TestCase
         self::assertResult(MatchOutcome::MATCHES, '', $substituted->assess('posts:read', 'posts:org:1', ['input' => ['tenant' => 'org']], $interpolator));
     }
 
+    /**
+     * A resource pattern of `PHP_MAXPATHLEN` bytes or more once resolved never
+     * reaches `fnmatch()`: it is unresolved, so the test is undecidable unless
+     * another pattern matches; one a byte shorter is matched.
+     *
+     * @return void
+     */
+    public function testAResourcePatternTooLongForFnmatchIsUnresolved(): void
+    {
+        $interpolator = new ContextInterpolator;
+        $substituted  = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${input.id}']]);
+        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${input.id}', 'posts:*']]);
+        $negated      = Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'not_resources' => ['posts:${input.id}']]);
+        $literal      = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:' . \str_repeat('k', \PHP_MAXPATHLEN - 6)]);
+        $long         = ['input' => ['id' => \str_repeat('k', \PHP_MAXPATHLEN - 6)]];
+        $longest      = \str_repeat('k', \PHP_MAXPATHLEN - 7);
+
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $substituted->assess('posts:read', 'posts:1', $long, $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', $fallback->assess('posts:read', 'posts:1', $long, $interpolator));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $negated->assess('posts:read', 'posts:1', $long, $interpolator));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $literal->assess('posts:read', 'posts:1'));
+        self::assertResult(MatchOutcome::MATCHES, '', $substituted->assess('posts:read', "posts:{$longest}", ['input' => ['id' => $longest]], $interpolator));
+    }
+
+    /**
+     * A resource identifier of `PHP_MAXPATHLEN` bytes or more makes a statement
+     * invalid once one of its patterns resolves, and undecidable when none
+     * does; one a byte shorter is matched, and a statement without patterns
+     * names it.
+     *
+     * @return void
+     */
+    public function testAResourceTooLongForFnmatchIsInvalidOnceAPatternResolves(): void
+    {
+        $interpolator = new ContextInterpolator;
+        $mixed        = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${input.missing}', 'other:*']]);
+        $unresolved   = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['posts:${input.missing}']]);
+        $long         = 'posts:' . \str_repeat('k', \PHP_MAXPATHLEN - 6);
+        $longest      = 'posts:' . \str_repeat('k', \PHP_MAXPATHLEN - 7);
+        $detail       = 'a resource identifier of ' . \PHP_MAXPATHLEN . ' bytes or more cannot be matched';
+
+        self::assertResult(MatchOutcome::INVALID, $detail, $mixed->assess('posts:read', $long, [], $interpolator));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $unresolved->assess('posts:read', $long, [], $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', (new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:*']))->assess('posts:read', $longest));
+        self::assertResult(MatchOutcome::MATCHES, '', (new Statement(PolicyEffect::DENY, ['posts:read']))->assess('posts:read', $long));
+    }
+
     // ------------------------------------------------------------------
     // Conditions
     // ------------------------------------------------------------------

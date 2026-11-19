@@ -186,7 +186,8 @@ PostgreSQL, whose column must compare so (`attachment_collation`), and under its
 attachments must be on the model's connection (`attachment_connection`). A negation counts a condition the database
 cannot decide as met, so it never lets a row through. LongGuard applies when a statement weighed on every row of the
 class has a pattern that resolves, since `fnmatch()` refuses an identifier of `PHP_MAXPATHLEN` bytes or more and
-`check()` then throws; an attached policy's statements are weighed only on keys of at most 191 bytes.
+`check()` then denies as `invalid_policy`; an attached policy's statements are weighed only on keys of at most 191
+bytes. A pattern that resolves that long is unresolved in both.
 
 ## Failure / Edge Cases
 
@@ -208,7 +209,7 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
 | `too_many_scopes`, `too_many_attachments`                | More anchors, classes or record attachments than `authorization.query_scoping` allows, or four times `max_attachments` attached to the type's records in one scope whatever their actions            |
 | `inline_value`                                           | A value of a record attachment's or a subtree's query that no literal can stand for as the database reads it bound, or a subtree query whose text holds a question mark that is not a placeholder    |
 | `read_replica`                                           | A record attachment or a nested subtree in a query that is not itself run, so cannot be put on the write connection, on a model connection with a separate read connection outside a transaction     |
-| `resource_pattern`                                       | A material pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits                                             |
+| `resource_pattern`                                       | A material pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, or an integer id beyond 64 bits                                                                           |
 | `resource_namespace`                                     | A material statement reading `resource`, in a condition, an operand or a pattern                                                                                                                     |
 | `scope_variant_source`                                   | A material statement reading a namespace, or stating a requirement, through an unmarked seam                                                                                                         |
 | `invalid_statement`, `invalid_policy`                    | A material statement that cannot be evaluated, or any document that cannot be read                                                                                                                   |

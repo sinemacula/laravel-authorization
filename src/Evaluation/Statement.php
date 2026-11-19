@@ -76,6 +76,9 @@ final readonly class Statement
     /** @var string What the detail of a test whose substituted operand has the wrong type says. */
     public const string SUBSTITUTED_OPERAND = 'the substituted operand is an';
 
+    /** @var string Trace detail for resource patterns none of which covers the check while one cannot be resolved. */
+    private const string UNRESOLVED_RESOURCE = 'a resource pattern references a value that cannot be resolved';
+
     /** @var list<string> The path of every `${…}` reference the statement's condition operands and resource patterns name, each once, worked out once on construction. */
     public array $dependencies;
 
@@ -300,6 +303,22 @@ final readonly class Statement
     }
 
     /**
+     * Resolve a pattern for `fnmatch()`, or return null when it cannot be: a
+     * reference cannot be resolved, a substituted value holds a NUL byte, which
+     * names nothing, or the pattern is `PHP_MAXPATHLEN` bytes or more.
+     *
+     * @param  string  $pattern
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return string|null
+     */
+    public static function resolvedPattern(string $pattern, InterpolationScope $scope): ?string
+    {
+        $resolved = $scope->pattern($pattern);
+
+        return $resolved === null || \str_contains($resolved, "\0") || \strlen($resolved) >= \PHP_MAXPATHLEN ? null : $resolved;
+    }
+
+    /**
      * Assess the resource patterns against a check whose action the statement
      * names. A statement without `resources` or `not_resources` names every
      * resource and a check that names none; otherwise a check without a
@@ -508,10 +527,16 @@ final readonly class Statement
     private function matchesResource(string $resource, InterpolationScope $scope): MatchResult
     {
         $isNegated = $this->notResources !== null;
-        $isCovered = self::isCoveredByAny(($isNegated ? $this->notResources : $this->resources) ?? [], $resource, $scope);
+        $patterns  = ($isNegated ? $this->notResources : $this->resources) ?? [];
+
+        if (\strlen($resource) >= \PHP_MAXPATHLEN) {
+            return self::matchesLongResource($patterns, $scope);
+        }
+
+        $isCovered = self::isCoveredByAny($patterns, $resource, $scope);
 
         return match (true) {
-            $isCovered === null       => MatchResult::undecidable('a resource pattern references a value that cannot be resolved'),
+            $isCovered === null       => MatchResult::undecidable(self::UNRESOLVED_RESOURCE),
             $isCovered !== $isNegated => MatchResult::matches(),
             default                   => MatchResult::doesNotMatch(self::TARGET_MISMATCH),
         };
@@ -519,8 +544,8 @@ final readonly class Statement
 
     /**
      * Determine whether any of the patterns covers the resource: true when one
-     * does, false when none does, and null when none does but one references a
-     * value that cannot be resolved or that holds a NUL byte.
+     * does, false when none does, and null when none does but one cannot be
+     * resolved (see `resolvedPattern()`).
      *
      * @param  array<int, string>  $patterns
      * @param  string  $resource
@@ -532,11 +557,7 @@ final readonly class Statement
         $unresolved = false;
 
         foreach ($patterns as $pattern) {
-            // A substituted value holding a NUL byte names nothing, so the
-            // pattern is unresolved, as one whose reference cannot be resolved
-            // is, and never reaches fnmatch().
-            $resolved   = $scope->pattern($pattern);
-            $resolved   = $resolved !== null && \str_contains($resolved, "\0") ? null : $resolved;
+            $resolved   = self::resolvedPattern($pattern, $scope);
             $unresolved = $unresolved || $resolved === null;
 
             if ($resolved !== null && self::covers($resolved, $resource)) {
@@ -545,6 +566,25 @@ final readonly class Statement
         }
 
         return $unresolved ? null : false;
+    }
+
+    /**
+     * Assess a resource too long for `fnmatch()`: invalid once a pattern
+     * resolves, since none can be matched against it, else undecidable.
+     *
+     * @param  array<int, string>  $patterns
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private static function matchesLongResource(array $patterns, InterpolationScope $scope): MatchResult
+    {
+        foreach ($patterns as $pattern) {
+            if (self::resolvedPattern($pattern, $scope) !== null) {
+                return MatchResult::invalid('a resource identifier of ' . \PHP_MAXPATHLEN . ' bytes or more cannot be matched');
+            }
+        }
+
+        return MatchResult::undecidable(self::UNRESOLVED_RESOURCE);
     }
 
     /**

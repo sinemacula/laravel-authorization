@@ -87,17 +87,17 @@ final class StatementScreenTest extends TestCase
     }
 
     /**
-     * A pattern whose reference cannot be resolved, or resolves to a NUL byte,
-     * makes the target undecidable unless another pattern covers the row: a
-     * deny applies, an allow does not match, and no pattern is matched against
-     * the identifier when none resolves.
+     * A pattern whose reference cannot be resolved, or resolves to a NUL byte
+     * or too long for `fnmatch()`, makes the target undecidable unless another
+     * pattern covers the row: a deny applies, an allow does not match, and no
+     * pattern is matched against the identifier when none resolves.
      *
      * @return void
      */
     public function testAnUnresolvedPatternIsUndecidable(): void
     {
         [$screen, $subject] = $this->screen();
-        $unresolved         = new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.missing}:*', '${input.nul}']);
+        $unresolved         = new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.missing}:*', '${input.nul}', '${input.long}']);
         $negated            = new Statement(PolicyEffect::ALLOW, ['posts:view'], null, notResources: ['${input.missing}']);
 
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $unresolved));
@@ -273,7 +273,8 @@ final class StatementScreenTest extends TestCase
      */
     private function terms(StatementScreen $screen, Subject $subject, Statement $statement, string $policy = 'policy'): array
     {
-        $context = new CheckContext(['input' => ['type' => self::type(), 'nul' => "a\0b"]], [], null, new PrincipalSelectors($subject));
+        $input   = ['type' => self::type(), 'nul' => "a\0b", 'long' => \str_repeat('k', \PHP_MAXPATHLEN)];
+        $context = new CheckContext(['input' => $input], [], null, new PrincipalSelectors($subject));
 
         return $screen->terms(new StatementReference($policy, 0), $statement, $context);
     }

@@ -177,7 +177,8 @@ A test is **undecidable** when:
 - a `${...}` reference cannot be resolved in a resource pattern (unless another of the statement's patterns covers the
   resource) or in an operand, or a resource pattern of a directly constructed statement holds a malformed reference;
   a resource pattern left holding a NUL byte, by a substituted value or as written on a directly constructed
-  statement, is unresolved the same way;
+  statement, is unresolved the same way, and so is one of `PHP_MAXPATHLEN` bytes or more once resolved and escaped
+  (1024 on macOS, 4096 on Linux), which `fnmatch()` cannot test, so a deny on a long `${input.*}` id applies;
 - the context value has the wrong type for the operator (see the catalogue below), including a value that is not a valid
   IP address for `ip_in` or `ip_not_in` and one that is not a list of scalars for `any_value_in` or `all_values_in`;
 - an interpolated operand resolves to a value of the wrong type for the operator (for example a `${...}` `ip_in` operand
@@ -195,6 +196,11 @@ each of these):
   `starts_with`, `ends_with` or `like`, `NAN` or an infinity for `gt`, `gte`, `lt` or `lte`, anything but `true` or
   `false` for `null`, and a set holding `null` or an array;
 - a string operand holds a malformed `${...}` reference.
+
+A resource identifier of `PHP_MAXPATHLEN` bytes or more makes a statement invalid once one of its patterns resolves,
+since `fnmatch()` cannot test it, with the detail `a resource identifier of <n> bytes or more cannot be matched`; it
+denies the check as `invalid_policy`, as a held permission cannot outweigh it. A statement without resource patterns
+still names it.
 
 The detail of an invalid test names it and the fault, in the same words `Statement::fromArray()` uses to refuse it: for
 example `conditions have an unknown operator 'unknown_op'` or
