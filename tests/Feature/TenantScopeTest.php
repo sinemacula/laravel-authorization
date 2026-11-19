@@ -824,6 +824,22 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * A colon in a tenant's key is escaped in the scope key, so the tenant
+     * never shares one with another tenant decided just below.
+     *
+     * @return void
+     */
+    public function testTheScopeKeyEscapesAColonInTheTenant(): void
+    {
+        $colon = StubTenant::query()->create(['id' => 'x:below', 'name' => 'colon']);
+        $plain = StubTenant::query()->create(['id' => 'x', 'name' => 'plain']);
+        $type  = $colon->getMorphClass();
+
+        self::assertSame("{$type}:x%3Abelow:every", TenantScope::within($colon, null, static fn (): string => TenantScope::scopeKey()));
+        self::assertSame("{$type}:x:below:every", TenantScope::within($plain, null, static fn (): string => TenantScope::scopeKey(), true));
+    }
+
+    /**
      * Once the package refuses, a scoped model's query, `within()`, before its
      * callback runs, and every getter of the tenant refuse by the scope's own
      * guard, before the subject resolver is resolved.

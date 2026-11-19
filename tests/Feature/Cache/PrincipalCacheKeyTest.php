@@ -37,7 +37,11 @@ final class PrincipalCacheKeyTest extends TestCase
         $user = new StubGrantee(['id' => 'ann']);
 
         self::assertSame(StubGrantee::class . ':ann', PrincipalCacheKey::for($user));
-        self::assertMatchesRegularExpression('/^stdClass:%obj[0-9a-f]{32}$/', PrincipalCacheKey::for(new \stdClass));
+        $first  = new \stdClass;
+        $second = new \stdClass;
+
+        self::assertMatchesRegularExpression('/^stdClass:%obj[0-9a-f]{32}$/', PrincipalCacheKey::for($first));
+        self::assertNotSame(PrincipalCacheKey::for($first), PrincipalCacheKey::for($second));
     }
 
     /**

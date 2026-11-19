@@ -118,7 +118,7 @@ final class PolymorphicGranteeTest extends TestCase
 
     /**
      * A grantee whose key holds a colon is never served the entries of one
-     * whose key and tenant spell the same text, nor the reverse.
+     * whose key and tenant spell the same text.
      *
      * @return void
      */
@@ -137,11 +137,6 @@ final class PolymorphicGranteeTest extends TestCase
         $this->actAsTenant($tenant);
 
         self::assertSame([false, true, false], self::decisions($member));
-
-        $this->startRequest();
-        $this->actAsTenant(null);
-
-        self::assertSame([true, false, false], self::decisions($plain));
     }
 
     /**

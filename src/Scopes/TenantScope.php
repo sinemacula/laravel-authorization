@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
+use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -141,7 +142,7 @@ final class TenantScope implements Scope
 
             $below = $resolved->isBelow ? ':below' : '';
 
-            return \implode(':', self::extractTenantPair($resolved->tenant)) . $below . ':' . $application;
+            return \implode(':', \array_map(PrincipalCacheKey::escape(...), self::extractTenantPair($resolved->tenant))) . $below . ':' . $application;
         });
 
         return $scope ?? 'platform:every';
