@@ -106,14 +106,14 @@ carry references, names and ids, never a value the decision read, and are dispat
    grantee that held the permission directly and every role that carried it; `Policy\Deleted` every grantee it was
    attached to. Each list is read before the row goes, inside the delete's transaction, in every scope and whether or
    not the grant had expired; the grantees are ordered by type and key. A deleted role's own policy attachments are each
-   reported as `Grantee\PolicyDetached`, as a deleted grantee's grants are, and a deleted grantee's inline policies
-   each as `Policy\Deleted`, in an operation of their own with no actor. A deleted policy's attachments to resources go
-   with its row, through the foreign key, and are not reported one by one: `Policy\Deleted` stands for them. A policy in
-   use as a permission boundary is never deleted: the delete is refused with `BoundaryException` before anything is read
-   or written, so no `Policy\Deleted` and no `BoundaryRemoved` is dispatched for it. Nor is a policy in use as a
-   guardrail, which is not edited either: the delete or the update is refused with `GuardrailException`, so no
-   `Policy\Deleted` or `Policy\Updated` is dispatched for it until each guardrail is removed, each reported as
-   `GuardrailRemoved`.
+   reported as `Grantee\PolicyDetached`, as a deleted grantee's grants are, and a deleted grantee's inline policies each
+   as `Policy\Deleted`, in an operation of their own with no actor. A soft-deleted role or grantee keeps them, and
+   reports none, until it is force-deleted. A deleted policy's attachments to resources go with its row, through the
+   foreign key, and are not reported one by one: `Policy\Deleted` stands for them. A policy in use as a permission
+   boundary is never deleted: the delete is refused with `BoundaryException` before anything is read or written, so no
+   `Policy\Deleted` and no `BoundaryRemoved` is dispatched for it. Nor is a policy in use as a guardrail, which is not
+   edited either: the delete or the update is refused with `GuardrailException`, so no `Policy\Deleted` or
+   `Policy\Updated` is dispatched for it until each guardrail is removed, each reported as `GuardrailRemoved`.
 
 9. **Decisions as references.** A decision event carries `subject` and `identity`, references to the principal the
    decision was about and its identity, null for a guest and never filled from the authenticated user; `previewer`,

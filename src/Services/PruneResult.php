@@ -29,7 +29,7 @@ final readonly class PruneResult
         /** The grants removed because they had expired. */
         public int $expired,
 
-        /** The grants removed because their grantee no longer exists, its permission boundaries apart. */
+        /** The grants removed, and break-glass activations ended, because their grantee no longer exists, its boundaries apart. */
         public int $orphaned,
 
         /** The inline policies removed because the grantee they belong to no longer exists. */

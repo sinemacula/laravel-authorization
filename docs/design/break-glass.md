@@ -113,15 +113,21 @@ This note records the invariants they fix.
     an end that ended one `Grantee\BreakGlassSurrendered` or `Grantee\BreakGlassRevoked` (with `endedAt`), through
     `OperationScope::dispatch()` inside the operation, so each fires once the write commits and never for a refusal, an
     end that changed nothing or a rollback, whether break-glass is enabled or not. The operation's actor is the granter,
-    the grantee who surrendered or the revoker, none for a trusted call.
+    the grantee who surrendered or the revoker, none for a trusted call. `GrantService::revokeAll()`, which a grantee's
+    deletion and the prune of a grantee that is gone run, also ends every activation of the grantee not ended or
+    expired, whether break-glass is enabled or not, as revoked, in the same operation and transaction as its grants:
+    each is locked as it is read, counted in what the call returns and reported with `Grantee\BreakGlassRevoked`, ended
+    as `revoke()` ends one (`Services\Support\ActivationEnds`).
 
 12. **Holding the right is the gate.** A delegated activation is decided through `check()` on
     `OperationResource::breakGlass()`, in the activation's tenant and application, under
     `authorization:break-glass.activate` for the actor itself or `authorization:break-glass.grant` for another, and a
-    delegated end under `authorization:break-glass.revoke`. The administration stage weighs them by the scope rule
-    alone (`OperationConstraints`): the actor must hold the right across the activation's reach, an end only narrows,
-    and neither rank, the self rule nor what the role hands out is weighed. Denies, boundaries, guardrails and caps
-    still apply to what the activated role grants. A trusted call skips the right and none of the other refusals.
+    delegated end under `authorization:break-glass.revoke`, an end by a delegated `revokeAll()` included, decided in the
+    activation's scope with the call's other changes before anything is written. The administration stage weighs them
+    by the scope rule alone (`OperationConstraints`): the actor must hold the right across the activation's reach, an
+    end only narrows, and neither rank, the self rule nor what the role hands out is weighed. Denies, boundaries,
+    guardrails and caps still apply to what the activated role grants. A trusted call skips the right and none of the
+    other refusals.
 
 13. **Hooks and locks as a grant.** The grant hooks are asked about an activation as about a grant of its role in its
     scope until its expiry (`Hooks\WideningPhase`, a `ProposedGrant` under `authorization:role.grant`), before any
@@ -190,7 +196,9 @@ This note records the invariants they fix.
 21. **A role's deletion reports its activations.** `Enums\GrantTarget::holders()` lists the grantees of a role's
     activations not ended or expired, which the deletion deletes, beside its grantees, each once, so
     `Role\Deleted::grantees()` names them. `Services\GrantPruner` never deletes an activation, a grantee that no
-    longer exists included: it only records an expiry (invariant 15).
+    longer exists included: it records an expiry (invariant 15), and its `revokeAll()` of a grantee that is gone, found
+    by its grant rows, boundaries or unexpired activations, ends the grantee's unexpired activations (invariant 11),
+    counted among its grants, pretending too.
 
 ## Success Path
 
@@ -215,7 +223,7 @@ This note records the invariants they fix.
 - An activation that has ended, or expired, grants nothing; one of a machine, of an identity, or naming half a tenant
   grants nothing anywhere.
 - A normal grant of the same role and an activation are separate: ending the activation leaves the grant's access, and
-  revoking the grant leaves the activation's.
+  revoking the grant leaves the activation's. `GrantService::revokeAll()` ends both.
 - The roles relation reads a table the activations migration creates: an application upgrading the package runs its
   migrations before serving checks, as for any table the package adds.
 
@@ -232,6 +240,8 @@ This note records the invariants they fix.
 - `Services\BreakGlassService`, `Enums\BreakGlassRefusal`, `Exceptions\BreakGlassRefusedException`,
   `Exclusions\Support\ExclusionGuard::assertActivatable()` -- the write path, its refusals, and `assertHoldable()` and
   the exclusion check under the role's lock.
+- `Services\Support\ActivationEnds`, `Services\GrantService::revokeAll()` -- an end, and the grantee's activations ended
+  with its grants.
 - `Support\PackagePermissions`, `Administration\OperationResource::breakGlass()`,
   `Administration\OperationConstraints` -- the three rights and how a delegated call is weighed.
 - `Query\ScopeAnchors`, `Query\ScopeClasses` -- the activations' tenants among the anchors, compared as bytes.
@@ -278,6 +288,11 @@ This note records the invariants they fix.
   PostgreSQL and MySQL; and, in forked processes on PostgreSQL and MySQL, two activations of one role sharing its lock
   while a deletion of it waits, and an activation racing a grant or an activation of its pair's other role queueing on
   the pair.
+- `Services\GrantServiceTest`, `Services\ActivationEndsTest` (Feature) -- `revokeAll()` ending each unexpired
+  activation, while break-glass is off too, locked, counted and reported in the call's operation, an expired, an ended
+  and another grantee's left alone, a cached allow dropped, and a failed end rolling back the grants with it; a
+  delegated call refused without the revoke right in the activation's scope, with nothing changed, and the right decided
+  when the grantee holds nothing; the end recorded once, to the second, by the operation's actor.
 - `Services\BreakGlassServiceTest` (Feature) -- each lifecycle event once, with its fields and actor, a surrender's
   actor the grantee; none for a refusal, a rollback, an end that changed nothing; a revocation reported while
   disabled. `Events\Grantee\BreakGlass{Activated,Ended,Surrendered,Revoked,Expired}Test` (Unit) -- the identifiers,
@@ -302,7 +317,7 @@ This note records the invariants they fix.
   each, and its use unknown.
 - `Services\GrantTargetTest`, `Services\RoleServiceTest`, `Services\GrantPrunerTest`, `Usage\UsagePrunerTest`,
   `Usage\RouteSourcesTest` (Feature) -- a role's deletion naming its activations' grantees once, an orphaned grantee's
-  activation kept, and no use counted.
+  live activation ended and kept, and no use counted.
 
 ## Change Triggers
 
