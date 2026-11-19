@@ -561,7 +561,8 @@ final readonly class ResolutionCache
      * Return the entry of the kind for the grantee from the memo, then from the
      * store while its versions hold, then from the resolution, storing what the
      * resolution finds when nothing it read changed as it ran. The grantee's
-     * version is pinned first, unless the entry is not a grantee's.
+     * version is pinned first, unless the entry is not a grantee's. A grantee
+     * with no key is kept in the memo alone.
      *
      * @template TValue
      *
@@ -586,9 +587,8 @@ final readonly class ResolutionCache
         $kind    = $this->activations?->kindOf($kind, $grantee) ?? $kind;
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
-        // A grantee with no key is known by an object hash, which another
-        // object takes once it is gone, so it is held for as long as the memo
-        // may serve it, and never reaches the store.
+        // A keyless grantee is known by an object hash PHP reuses once it is
+        // gone, so it is held while the memo may serve it, and never stored.
         $isKeyless = PrincipalCacheKey::isKeyless($grantee);
 
         if ($isKeyless) {

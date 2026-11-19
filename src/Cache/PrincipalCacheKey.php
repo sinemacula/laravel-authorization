@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *
  * Eloquent models use their canonical `getMorphClass()` + `getKey()` pairing.
  * Non-Eloquent principals are duck-typed on those same accessors; principals
- * exposing neither fall back to a per-request `spl_object_hash()`, in which
+ * with no usable key fall back to a per-request `spl_object_hash()`, in which
  * case only the in-memory memo applies.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -68,9 +68,7 @@ final class PrincipalCacheKey
      */
     public static function isKeyless(object $principal): bool
     {
-        $key = \method_exists($principal, 'getKey') ? $principal->getKey() : null;
-
-        return !\is_int($key) && (!\is_string($key) || $key === '');
+        return self::key($principal) === null;
     }
 
     /**
@@ -112,15 +110,20 @@ final class PrincipalCacheKey
      */
     private static function id(object $principal): string
     {
-        if (\method_exists($principal, 'getKey')) {
-            /** @var mixed $raw */
-            $raw = $principal->getKey();
+        return self::key($principal) ?? 'obj:' . \spl_object_hash($principal);
+    }
 
-            if ((\is_string($raw) || \is_int($raw)) && (string) $raw !== '') {
-                return (string) $raw;
-            }
-        }
+    /**
+     * Return the principal's key when it is an integer or a non-empty string.
+     *
+     * @param  object  $principal
+     * @return string|null
+     */
+    private static function key(object $principal): ?string
+    {
+        /** @var mixed $key */
+        $key = \method_exists($principal, 'getKey') ? $principal->getKey() : null;
 
-        return 'obj:' . \spl_object_hash($principal);
+        return (\is_int($key) || \is_string($key)) && $key !== '' ? (string) $key : null;
     }
 }
