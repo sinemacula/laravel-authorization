@@ -24,9 +24,11 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * it never implicitly permits distributing whatever the operation hands out.
  * The grantable rights let an actor hand out a permission or an approved
  * version of a policy it does not hold, and `administration.unbounded` lets a
- * delegated change lift or widen a permission boundary; the read actions are
- * declared for a later part of delegated administration, and nothing checks
- * them yet. `subject.preview` is the right to preview another subject
+ * delegated change lift or widen a permission boundary; `policy.read` is the
+ * right to list policies through the policy service, decided on no resource in
+ * the scope in place; `role.read` and `permission.read` are declared for a
+ * later part of delegated administration, and nothing checks them yet.
+ * `subject.preview` is the right to preview another subject
  * (`Authorization::previewFor()`), decided on a preview resource (see
  * `Preview\PreviewResource`); it is spelt as the administration actions are,
  * the subject its noun, though a preview administers nothing. `review.read` is
