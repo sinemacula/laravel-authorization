@@ -40,8 +40,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * every guardrail it is has been removed through the guardrail service.
  *
  * A policy is owned by the platform (both tenant columns null) or by one tenant
- * (both set), as roles and permissions are. Unlike theirs, policy reads are not
- * yet filtered by the current tenant.
+ * (both set), as roles and permissions are. Unlike theirs, the model carries no
+ * tenant scope: `PolicyService::list()` filters by the current tenant itself.
  *
  * Registered via `#[ObservedBy(PolicyObserver::class)]` on the `Policy` model.
  *

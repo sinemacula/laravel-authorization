@@ -13,15 +13,12 @@ use SineMacula\Laravel\Authorization\Administration\OperationGrantee;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
-use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\BreakGlassRefusal;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassActivated;
-use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked;
-use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassSurrendered;
 use SineMacula\Laravel\Authorization\Exceptions\BreakGlassRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -30,6 +27,7 @@ use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\Support\ActivationEnds;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
@@ -223,7 +221,7 @@ final class BreakGlassService
                 throw new BreakGlassRefusedException(BreakGlassRefusal::NOT_GRANTEE, "Activation '{$key}' can be surrendered only by its own grantee, acting as itself.");
             }
 
-            return self::end($stored, 'surrendered', $operation);
+            return ActivationEnds::end($stored, 'surrendered', $operation);
         }, $actor);
     }
 
@@ -245,14 +243,9 @@ final class BreakGlassService
 
         /** @var int */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BREAK_GLASS_REVOKE]), static function (Operation $operation) use ($key, $actor): int {
-            if ($actor !== null) {
-                $read     = self::find($key);
-                $resource = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_REVOKE, self::granteeOf($read), self::roleOf($read), self::scopeOf($read));
+            $actor?->authorizeIn($operation, ActivationEnds::revocation(self::find($key)));
 
-                $actor->authorizeIn($operation, $resource);
-            }
-
-            return self::end(self::find($key, true), 'revoked', $operation);
+            return ActivationEnds::end(self::find($key, true), 'revoked', $operation);
         }, $actor);
     }
 
@@ -405,42 +398,6 @@ final class BreakGlassService
     }
 
     /**
-     * Return the activation's role as stored.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
-     * @return \SineMacula\Laravel\Authorization\Models\Role
-     */
-    private static function roleOf(BreakGlassActivation $activation): Role
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = ModelClasses::get('role');
-
-        return $class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($activation->role_id)->firstOrFail();
-    }
-
-    /**
-     * Return the activation's grantee.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
-     * @return \SineMacula\Laravel\Authorization\Support\Reference
-     */
-    private static function granteeOf(BreakGlassActivation $activation): Reference
-    {
-        return new Reference($activation->authorizable_type, $activation->authorizable_id);
-    }
-
-    /**
-     * Return the scope the activation holds in.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
-     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
-     */
-    private static function scopeOf(BreakGlassActivation $activation): GrantScope
-    {
-        return new GrantScope(Reference::tenantOf($activation), $activation->application, $activation->include_subtree);
-    }
-
-    /**
      * Return the activation with the key as stored, under a lock when asked; a
      * key that is not a UUID is found nowhere, on every database.
      *
@@ -463,35 +420,6 @@ final class BreakGlassService
         }
 
         return $query->firstOrFail();
-    }
-
-    /**
-     * End the activation for the reason, by the operation's actor, unless it
-     * has ended or expired already, report the end, and return how many were
-     * ended.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
-     * @param  'revoked'|'surrendered'  $reason
-     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @return int
-     */
-    private static function end(BreakGlassActivation $activation, string $reason, Operation $operation): int
-    {
-        $now = Carbon::now('UTC')->startOfSecond();
-        $by  = $operation->actor;
-
-        if ($activation->ended_at !== null || $activation->expires_at->lessThanOrEqualTo($now)) {
-            return 0;
-        }
-
-        $activation->forceFill(['ended_at' => $now, 'ended_by_type' => $by?->type, 'ended_by_id' => $by?->id, 'end_reason' => $reason])->save();
-
-        $role  = self::roleOf($activation);
-        $event = [$operation, self::granteeOf($activation), Reference::of($role), $role->name, self::scopeOf($activation), $activation->id, $now->toImmutable()];
-
-        OperationScope::dispatch($reason === 'surrendered' ? new BreakGlassSurrendered(...$event) : new BreakGlassRevoked(...$event));
-
-        return 1;
     }
 
     /**

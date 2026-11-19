@@ -93,7 +93,7 @@ final class Definitions
      */
     public static function keyAsText(Builder $query, string $column): string
     {
-        return (new KeyAsText($column))->getValue($query->getGrammar());
+        return (new KeyAsText($column, uuid: true))->getValue($query->getGrammar());
     }
 
     /**
