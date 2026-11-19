@@ -47,15 +47,16 @@ writes them and a policy naming them validates:
 Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and `detachAll()` decide each change they
 make under its own action (there is no blanket action), and every change is decided before any is written, so a batch is
 atomic: one refusal leaves nothing written and dispatches no change event, and no change is decided on authority an
-earlier one would have handed out. `revokeAll()` removes the grantee's boundaries too, so it decides
-`authorization:boundary.remove` for each. A row naming half a tenant is decided at platform scope, in its application,
-since it is neither the platform's nor any tenant's and what restricts of it holds everywhere: an actor whose authority
-is held only within a tenant is refused while the grantee or record has one. A sync decides a grant of each listed row
-the grantee does not hold live, the row kept unchanged for each it does hold live, and a revocation of each it drops; it
-judges which rows are live at one instant and re-arms as of the same instant, so a row decided as kept unchanged is
-never re-armed, even when it expires before it is written. A grant, an attachment or a set is decided whether or not it
-changes anything; a revocation by name decides each held row of the name, or, when none is held, the row the lookup
-ranks first.
+earlier one would have handed out. `revokeAll()` removes the grantee's boundaries and ends its unexpired break-glass
+activations too, whether break-glass is on or off, so it decides `authorization:boundary.remove` for each boundary and
+`authorization:break-glass.revoke` for each activation, in the activation's scope. A row naming half a tenant is decided
+at platform scope, in its application, since it is neither the platform's nor any tenant's and what restricts of it
+holds everywhere: an actor whose authority is held only within a tenant is refused while the grantee or record has one.
+A sync decides a grant of each listed row the grantee does not hold live, the row kept unchanged for each it does hold
+live, and a revocation of each it drops; it judges which rows are live at one instant and re-arms as of the same
+instant, so a row decided as kept unchanged is never re-armed, even when it expires before it is written. A grant, an
+attachment or a set is decided whether or not it changes anything; a revocation by name decides each held row of the
+name, or, when none is held, the row the lookup ranks first.
 
 A delegated call that finds nothing to change is still decided, on the change it was asked for: a revocation, detach or
 removal of what the grantee does not hold, a sync of what it already holds live, and `revokeAll()`, `removeAll()` or
@@ -382,8 +383,9 @@ The tenant tree is yours and cannot be locked, so the chain of every tenant invo
 the call reads everything again, as the decision read it and under the lock: a grant revoked from the actor, a role
 given more, a policy rewritten or attached, or a tenant moved meanwhile has the whole call rolled back and tried again,
 decided on what was committed, so it is refused or made as the new state allows. `revokeAll()` and
-`BoundaryService::removeAll()` remove exactly the rows they decided, by key, never one granted meanwhile, and a sync
-never writes back a row it decided as held that is gone by the write.
+`BoundaryService::removeAll()` remove exactly the rows they decided, by key, never one granted meanwhile, `revokeAll()`
+ends exactly the activations it decided, locked as it read them, and a sync never writes back a row it decided as held
+that is gone by the write.
 
 A conflict found this way is tried again; so is a deadlock, serialisation failure, lock wait timeout or busy database
 the database refuses the call with (as Laravel's concurrency error detector tells them), when the call opened the
