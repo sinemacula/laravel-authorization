@@ -122,8 +122,9 @@ themselves are described in [Events](events.md).
     carry no foreign key. A soft-deleted role keeps them until it is force-deleted.
 
 11. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
-   tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
-   that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
+   tenant's and the platform's alike; a permission named for a role answers among those visible in the role's tenant, or
+   the platform's alone for a platform role. A revocation by name revokes each of them the grantee or role holds, and a
+   sync that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
 12. **A resource's policies are attached like grants.** `ResourcePolicyService::attach()` writes a row of
     `resource_policies`: the policy, the resource's morph type and its key (null for the whole type), and the scope,
