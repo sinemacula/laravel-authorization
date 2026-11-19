@@ -50,8 +50,8 @@ subject from the console.
    (`CheckContext::noteIfUnresolved()`). The statement takes them after each test, so telling the outcome reads
    nothing new, and it notes its tests with the context, which the evaluator takes into the statement's step;
    `MatchResult` carries none, so an everyday assessment builds no more than it did. A string operator's substituted
-   operand that is empty or holds a NUL byte, against a string value it can test, is `undecidable`, the operand's
-   doing, never `wrong_type`.
+   operand that is empty, holds a NUL byte or is too long for `like`, against a string value it can test, is
+   `undecidable`, the operand's doing, never `wrong_type`; a `like` value too long to test is `wrong_type`.
 
 6. **Grant provenance, matched to what decided.** For an explained check, `Resolvers\GrantProvenanceResolver`
    decides the permission held and the policies of the principal and its identity from what an everyday check decides

@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -174,6 +175,33 @@ final class ResolvesPivotExpiryTest extends TestCase
         (new TenantScope)->flushResolvedTenant();
 
         self::assertFalse($isAdmin());
+    }
+
+    /**
+     * A role check on one instance stops counting a role granted in the old
+     * parent once a move of its tenant is reported.
+     *
+     * @return void
+     */
+    public function testARoleCheckDropsAnOldAncestorsRoleOnceAMoveIsReported(): void
+    {
+        [$account, $org, $other] = \array_map(self::createTenant(...), ['account', 'org', 'other']);
+        $user                    = StubGrantee::query()->create(['id' => 'user-1']);
+        $tree                    = (new StubTenantTree)->put(Reference::of($account), Reference::of($org));
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        Role::query()->create(['name' => 'admin']);
+        $user->assignRole('admin', null, $org);
+
+        $this->actAsTenant($account);
+
+        self::assertTrue($user->hasRole('admin'));
+
+        $tree->put(Reference::of($account), Reference::of($other));
+        Authorization::treeChanged($account);
+
+        self::assertFalse($user->hasRole('admin'));
     }
 
     /**

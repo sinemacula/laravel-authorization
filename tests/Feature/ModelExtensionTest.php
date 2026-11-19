@@ -7,11 +7,14 @@ namespace Tests\Feature;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\AfterClass;
 use PHPUnit\Framework\Attributes\BeforeClass;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -113,6 +116,40 @@ final class ModelExtensionTest extends TestCase
     }
 
     /**
+     * A trashed role keeps its policy attachments, reporting none detached, so
+     * a restore brings its policies back, and a force delete detaches them.
+     *
+     * @return void
+     */
+    public function testATrashedRoleKeepsItsPoliciesUntilForceDeleted(): void
+    {
+        $this->useModels(SoftDeletingRole::class);
+
+        $role = SoftDeletingRole::query()->create(['name' => 'editor']);
+
+        $role->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        Event::fake([PolicyDetached::class]);
+
+        $role->delete();
+
+        Event::assertNotDispatched(PolicyDetached::class);
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+        self::assertSame(1, DB::table('authorizable_policies')->count());
+
+        $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        $role->forceDelete();
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
      * A parent passes its permissions and policies to the holders of its child
      * until it is trashed. A role with children cannot be trashed, and one set
      * as a parent once trashed passes nothing, as the hierarchy reads roles
@@ -150,6 +187,65 @@ final class ModelExtensionTest extends TestCase
     }
 
     /**
+     * With a shared store, a restored role grants its permissions again to its
+     * holders and to the holders of a role set below it while it was trashed.
+     *
+     * @return void
+     */
+    public function testARestoredRoleGrantsAgainFromASharedStore(): void
+    {
+        $this->useSharedStore();
+
+        $role  = SoftDeletingRole::query()->create(['name' => 'editor']);
+        $child = SoftDeletingRole::query()->create(['name' => 'writer']);
+
+        $role->givePermission(CustomPermission::query()->create(['name' => 'posts:edit']));
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
+        StubGrantee::query()->create(['id' => 'user-2'])->assignRole($child);
+
+        $role->delete();
+        $child->update(['parent_id' => $role->id]);
+
+        $user = StubGrantee::query()->findOrFail('user-1');
+
+        self::assertSame([], $user->getRoles());
+        self::assertFalse(Authorization::for($user)->can('posts:edit'));
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-2'))->can('posts:edit'));
+
+        $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
+
+        $user = StubGrantee::query()->findOrFail('user-1');
+
+        self::assertSame(['editor'], $user->getRoles());
+        self::assertTrue(Authorization::for($user)->can('posts:edit'));
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-2'))->can('posts:edit'));
+    }
+
+    /**
+     * With a shared store, a policy attached to a trashed role counts for its
+     * holders once the role is restored.
+     *
+     * @return void
+     */
+    public function testARestoredRolesPoliciesCountAgainFromASharedStore(): void
+    {
+        $this->useSharedStore();
+
+        $role = SoftDeletingRole::query()->create(['name' => 'editor']);
+
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
+
+        $role->delete();
+        $role->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
+
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+    }
+
+    /**
      * Add the soft-delete column to the roles table once the package's schema
      * is migrated.
      *
@@ -175,5 +271,19 @@ final class ModelExtensionTest extends TestCase
     private function useModels(string $role): void
     {
         config(['authorization.models.role' => $role, 'authorization.models.permission' => CustomPermission::class]);
+    }
+
+    /**
+     * Register the soft-deleting role and keep entries in the array store.
+     *
+     * @return void
+     */
+    private function useSharedStore(): void
+    {
+        $this->useModels(SoftDeletingRole::class);
+
+        config(['authorization.cache.store' => 'array']);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
     }
 }

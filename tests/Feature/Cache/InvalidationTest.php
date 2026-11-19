@@ -6,6 +6,7 @@ namespace Tests\Feature\Cache;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Invalidation;
@@ -15,6 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -34,6 +36,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Fixtures\SoftDeletingRole;
 use Tests\TestCase;
 
 /**
@@ -300,6 +303,57 @@ final class InvalidationTest extends TestCase
         $this->nextRequest();
 
         self::assertSame('deny', $this->fresh($user)->getPolicies()[0]->statements[0]->effect->value);
+    }
+
+    /**
+     * A soft-deleting role restored bumps the role and its holders; any other
+     * update, or a role class without soft deletes, bumps the role alone.
+     *
+     * @return void
+     */
+    public function testARestoredRoleBumpsItsHolders(): void
+    {
+        $versions = $this->versions();
+        $user     = StubGrantee::create(['id' => 'user-1']);
+        $role     = Role::create(['name' => 'editor']);
+
+        $user->assignRole($role);
+
+        $ref      = Reference::of($role);
+        $restored = new RoleUpdated(Operation::begin(), $ref, 'editor', null, null, ['before' => ['deleted_at' => '2026-01-01'], 'after' => ['deleted_at' => null]]);
+        $renamed  = new RoleUpdated(Operation::begin(), $ref, 'editor', null, null, ['before' => ['name' => 'author'], 'after' => ['name' => 'editor']]);
+        $key      = $versions->roleKey($role->id);
+
+        self::assertSame([$key], Invalidation::keys($versions, [$restored]));
+
+        config(['authorization.models.role' => SoftDeletingRole::class]);
+
+        self::assertSame([$key, $versions->granteeKey($user)], Invalidation::keys($versions, [$restored]));
+        self::assertSame([$key], Invalidation::keys($versions, [$renamed]));
+    }
+
+    /**
+     * A role delete whose transaction rolls back grants again, though a check
+     * inside the transaction stored its holder's denial.
+     *
+     * @return void
+     */
+    public function testARolledBackRoleDeleteGrantsAgain(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        $role->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->assignRole($role);
+
+        DB::beginTransaction();
+        $role->delete();
+        $inside = $this->fresh($user)->hasPermission('posts:edit');
+        DB::rollBack();
+        $this->nextRequest();
+
+        self::assertFalse($inside);
+        self::assertTrue($this->fresh($user)->hasPermission('posts:edit'));
     }
 
     /**
