@@ -7,11 +7,13 @@ namespace Tests\Feature;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\AfterClass;
 use PHPUnit\Framework\Attributes\BeforeClass;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -110,6 +112,40 @@ final class ModelExtensionTest extends TestCase
         self::assertSame([], $user->getPermissions());
         self::assertFalse(Authorization::for($user)->can('posts:edit'));
         self::assertSame(1, DB::table('authorizable_roles')->count());
+    }
+
+    /**
+     * A trashed role keeps its policy attachments, reporting none detached, so
+     * a restore brings its policies back, and a force delete detaches them.
+     *
+     * @return void
+     */
+    public function testATrashedRoleKeepsItsPoliciesUntilForceDeleted(): void
+    {
+        $this->useModels(SoftDeletingRole::class);
+
+        $role = SoftDeletingRole::query()->create(['name' => 'editor']);
+
+        $role->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        Event::fake([PolicyDetached::class]);
+
+        $role->delete();
+
+        Event::assertNotDispatched(PolicyDetached::class);
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+        self::assertSame(1, DB::table('authorizable_policies')->count());
+
+        $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        $role->forceDelete();
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
     }
 
     /**
