@@ -121,7 +121,7 @@ The scope compiles every statement it can compare with each row's key in SQL exa
 - rows whose key cannot identify a record (null, empty or holding a NUL byte), rows whose tenant columns hold something
   other than a string, an integer or null (a real number SQLite keeps in an integer column) or a part over 191 bytes,
   and, when a statement matches a pattern against the identifier, rows whose identifier is too long for `fnmatch()`,
-  are left out, as `check()` denies or throws on them.
+  are left out, as `check()` denies them.
 
 A tree other than the flat one is read through `TenantTree::subtree()`, nested in the condition whole, so it must run on
 the model's connection, and one on another is refused as `subtree_connection` (the [grant scope
@@ -202,7 +202,7 @@ else that could change a decision refuses, with no pruning:
 | `too_many_scopes`, `too_many_attachments`                | More tenants, classes or record attachments than `authorization.query_scoping` allows                                                                |
 | `inline_value`                                           | A tenant, application or policy value, or a subtree query, that cannot be inlined exactly as the database reads it bound                             |
 | `read_replica`                                           | A record attachment or subtree read by a query that is not itself run, on a separate read connection outside a transaction                           |
-| `resource_pattern`                                       | A pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits      |
+| `resource_pattern`                                       | A pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, or an integer id beyond 64 bits                                    |
 | `resource_namespace`, `scope_variant_source`             | A statement reading the resource, or a source not marked `ScopeInvariant`                                                                            |
 | `invalid_statement`, `invalid_policy`                    | A statement that cannot be evaluated, or a document that cannot be read                                                                              |
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition                                                                                                              |
