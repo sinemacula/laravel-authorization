@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -32,6 +33,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\RacesAnotherSession;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubGrantee;
@@ -51,7 +53,9 @@ use Tests\TestCase;
  * `administration.conflict`, recorded and reported as the actor's refusal. Each
  * race is simulated inside the operation's try, as the reads that follow it
  * would see a concurrent commit, so the version check runs on SQLite as on
- * PostgreSQL and MySQL.
+ * PostgreSQL and MySQL. On PostgreSQL and MySQL a second session also races the
+ * call: its write of a row the call locked waits, and a revocation it commits
+ * after the caller's snapshot is never written over.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,7 +67,13 @@ use Tests\TestCase;
 #[CoversClass(ConflictRetries::class)]
 final class DelegatedRacesTest extends TestCase
 {
-    use ActsAsTenant, RacesDelegatedCalls, ReportsEveryDecision;
+    use ActsAsTenant, RacesAnotherSession, RacesDelegatedCalls, ReportsEveryDecision;
+
+    /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
+    private const array RACED = ['testTheActorsLocksHoldBackARevocation', 'testARevocationCommittedAfterTheSnapshotIsCaught'];
+
+    /** @var list<string> The tables a race writes, emptied once it ends. */
+    private const array TABLES = ['authorizable_permissions', 'authorizable_roles', 'permissions', 'roles', 'stub_grantees'];
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -476,6 +486,96 @@ final class DelegatedRacesTest extends TestCase
 
         self::assertSame(GrantOutcome::GRANTED, $outcome);
         self::assertCount(1, $tries);
+    }
+
+    /**
+     * A second session's revocation of the actor's right to grant waits for the
+     * delegated call, which locked the row before deciding, and the call makes
+     * its grant (MySQL and PostgreSQL).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActorsLocksHoldBackARevocation(): void
+    {
+        $this->raceOrSkip(self::TABLES, static function (): void {
+            $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
+            $user  = self::user('user');
+
+            self::assertWaits(
+                'insert',
+                'authorizable_permissions',
+                static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor),
+                static fn (Connection $other): int => self::revokeOn($other, 'admin', Actions::PERMISSION_GRANT),
+            );
+            self::assertTrue(self::holds($user, 'posts:edit'));
+        });
+    }
+
+    /**
+     * A revocation of the actor's grant that a second session commits after the
+     * caller's transaction first read is caught, so the call is refused rather
+     * than decided on the caller's snapshot: on MySQL's repeatable read the
+     * decision reads that snapshot and the check before the write finds it
+     * older than the locks, on every try (MySQL and PostgreSQL).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationCommittedAfterTheSnapshotIsCaught(): void
+    {
+        $this->raceOrSkip(self::TABLES, static function (): void {
+            $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
+            $user  = self::user('user');
+
+            $refusal = self::refusalOf(static fn (): GrantOutcome => DB::transaction(static function () use ($actor, $user): GrantOutcome {
+                DB::table('authorizable_permissions')->count();
+
+                self::revokeOn(DB::connection(self::OTHER_SESSION), 'admin', 'posts:edit');
+
+                return self::grants()->grantPermission($user, 'posts:edit', actor: $actor);
+            }));
+
+            $expected = DB::connection()->getDriverName() === 'mysql' ? DecisionReason::ADMINISTRATION_CONFLICT : DecisionReason::ADMINISTRATION_NOT_GRANTABLE;
+
+            self::assertSame($expected, $refusal->getReason());
+            self::assertFalse(self::holds($user, 'posts:edit'));
+        });
+    }
+
+    /**
+     * Run the races outside the test's transaction, so a call sees what another
+     * session commits; SQLite, which skips them, keeps its transaction.
+     *
+     * @return list<string|null>
+     */
+    #[\Override]
+    protected function connectionsToTransact(): array
+    {
+        $isRaced = \in_array($this->name(), self::RACED, true) && DB::connection()->getDriverName() !== 'sqlite';
+
+        /** @var list<string|null> $connections */
+        $connections = parent::connectionsToTransact();
+
+        return $isRaced ? [] : $connections;
+    }
+
+    /**
+     * Delete the identity's direct grant of the permission on the connection.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $id
+     * @param  string  $permission
+     * @return int
+     */
+    private static function revokeOn(Connection $connection, string $id, string $permission): int
+    {
+        return $connection->table('authorizable_permissions')
+            ->where('authorizable_id', $id)
+            ->where('permission_id', Permission::query()->where('name', $permission)->value('id'))
+            ->delete();
     }
 
     /**
