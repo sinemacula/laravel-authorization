@@ -76,6 +76,7 @@ final class PrincipalCacheKeyTest extends TestCase
         self::assertFalse(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 'ann'])));
         self::assertFalse(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 0])));
         self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => ''])));
+        self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 1.5])));
         self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee));
         self::assertTrue(PrincipalCacheKey::isKeyless(new \stdClass));
     }

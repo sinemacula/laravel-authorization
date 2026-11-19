@@ -128,9 +128,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * A grantee with no key never reaches the store, and an object made once
-     * another is gone is never served the other's entry, in the same request or
-     * the next.
+     * A grantee with no key is memoised but never reaches the store, and is
+     * held until the request ends, so an object made once another is gone is
+     * never served the other's entry, in the same request or the next.
      *
      * @return void
      */
@@ -149,21 +149,27 @@ final class ResolutionCacheTest extends TestCase
         $resolve = fn (string $name): \Closure => fn (): Resolution => $this->resolve([$name]);
         $cache   = $this->request();
         $first   = new \stdClass;
+        $held    = \WeakReference::create($first);
 
         $cache->rememberPermissions($first, $resolve('first'));
 
         unset($first);
 
+        self::assertNotNull($held->get());
+
         $second = new \stdClass;
 
         self::assertSame(['second'], $cache->rememberPermissions($second, $resolve('second')));
+        self::assertSame(['second'], $cache->rememberPermissions($second, $resolve('again')));
 
         unset($cache, $second);
 
         $next  = $this->request();
         $third = new \stdClass;
 
+        self::assertNull($held->get());
         self::assertSame(['third'], $next->rememberPermissions($third, $resolve('third')));
+        self::assertSame(3, $this->resolutions);
         self::assertSame([], $operations->getArrayCopy());
     }
 
