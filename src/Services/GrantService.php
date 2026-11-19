@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\Support\ActivationEnds;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
@@ -103,19 +104,21 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * revocation of each it drops; any other row it holds live decides nothing. A
  * revocation by name decides each held row of that name; one by model decides
  * that row whether it is held or not. `revokeAll()` decides the revocation of
- * every row and the removal of every permission boundary
- * (`authorization:boundary.remove`) the grantee has. There is no blanket
- * action. Each change is decided in the tenant of the row it changes, so an
- * actor whose authority for the action reaches that tenant, from a parent over
- * its subtree or from the platform, changes it from its own context, and
- * `revokeAll()` clears a grantee's rows across every tenant the actor
- * administers. Every change to an identity or a principal is then weighed by
- * the administration stage (see `OperationConstraints`): the actor must be
- * strictly senior to the grantee anywhere the change reaches
- * (`administration.rank`); one that may widen authority must be allowed across
- * its whole reach (`administration.scope`) and, made to the actor itself, also
- * allowed `authorization:administration.self` (`administration.self`). A change
- * that can only narrow (revoking a permission, a role no deny is attached to,
+ * every row, the removal of every permission boundary
+ * (`authorization:boundary.remove`) the grantee has, and the end of each of its
+ * unexpired break-glass activations (`authorization:break-glass.revoke`) in the
+ * activation's scope. There is no blanket action. Each change is decided in the
+ * tenant of the row it changes, so an actor whose authority for the action
+ * reaches that tenant, from a parent over its subtree or from the platform,
+ * changes it from its own context, and `revokeAll()` clears a grantee's rows
+ * across every tenant the actor administers. Every change to an identity or a
+ * principal is then weighed by the administration stage (see
+ * `OperationConstraints`): the actor must be strictly senior to the grantee
+ * anywhere the change reaches (`administration.rank`); one that may widen
+ * authority must be allowed across its whole reach (`administration.scope`)
+ * and, made to the actor itself, also allowed
+ * `authorization:administration.self` (`administration.self`). A change that
+ * can only narrow (revoking a permission, a role no deny is attached to,
  * detaching an allow-only policy, or a grant that only shortens one held, see
  * `Narrowing`) is then allowed; a direct grant of a permission, a sync's
  * additions included, is allowed when the actor provably holds it across its
@@ -503,15 +506,18 @@ final class GrantService
     }
 
     /**
-     * Revoke every role, permission and policy the grantee holds, and remove
-     * its permission boundaries, in one transaction and as one operation, each
-     * decided for an acting context before any is written, dispatching a
-     * revoked, detached or removed event for each, and return how many there
-     * were. The `HasAuthorization` trait calls this once a grantee is deleted,
-     * `RoleObserver` once a role is deleted, and the grant pruner for a grantee
-     * that no longer exists. For an acting context and a grantee that holds
-     * nothing, each of the call's actions is decided unchanged at platform
-     * scope, so an actor that may not take them is refused either way.
+     * Revoke every role, permission and policy the grantee holds, remove its
+     * permission boundaries and end its break-glass activations not ended or
+     * expired, whether break-glass is enabled or not, in one transaction and as
+     * one operation, each decided for an acting context before any is written,
+     * dispatching a revoked, detached or removed event for each, and return how
+     * many there were. An activation is decided under the break-glass revoke
+     * right in its scope and ended as revoked, as `BreakGlassService::revoke()`
+     * ends one. The `HasAuthorization` trait calls this once a grantee is
+     * deleted, `RoleObserver` once a role is deleted, and the grant pruner for
+     * a grantee that no longer exists. For an acting context and a grantee that
+     * holds nothing, each of the call's actions is decided unchanged at
+     * platform scope, so an actor that may not take them is refused either way.
      *
      * A row naming half a tenant, which the package never writes, is revoked or
      * removed too, decided at platform scope in the row's application, so it
@@ -531,12 +537,19 @@ final class GrantService
         PackageState::guardCurrent();
 
         $reference = self::grantee($grantee);
-        $actions   = [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE];
+        $actions   = [
+            PackagePermissions::ROLE_REVOKE,
+            PackagePermissions::PERMISSION_REVOKE,
+            PackagePermissions::POLICY_DETACH,
+            PackagePermissions::BOUNDARY_REMOVE,
+            PackagePermissions::BREAK_GLASS_REVOKE,
+        ];
         $operation = Operation::begin($actor, $actions);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $grantee, $reference): int {
             if ($actor === null) {
                 [$events, $malformed] = GrantChanges::revokeEverywhere($reference, $operation);
+                $activations          = ActivationEnds::unexpiredOf($reference);
             } else {
                 // The grantee's rows are locked before they are read, so what
                 // is revoked is exactly what was decided, never a row granted
@@ -547,7 +560,10 @@ final class GrantService
 
                 [$changes, $grants, $boundaries] = GrantChanges::everything($reference);
 
-                $actor->authorizeChanges($operation, [...$changes, ...GrantChanges::malformed($reference, $grants, $boundaries)], ...\array_map($unchanged, $operation->actions));
+                $activations = ActivationEnds::unexpiredOf($reference);
+                $further     = [...GrantChanges::malformed($reference, $grants, $boundaries), ...\array_map(ActivationEnds::revocation(...), $activations)];
+
+                $actor->authorizeChanges($operation, [...$changes, ...$further], ...\array_map($unchanged, $operation->actions));
 
                 $events    = GrantChanges::revokeDecided($reference, $operation, $changes);
                 $malformed = GrantChanges::revokeMalformed($reference, $operation, $grants, $boundaries);
@@ -555,7 +571,13 @@ final class GrantService
 
             SystemRoleGuard::dispatch('revoke-all', $grantee, $actor, ...$events);
 
-            return \count($events) + $malformed;
+            $ended = 0;
+
+            foreach ($activations as $activation) {
+                $ended += ActivationEnds::end($activation, 'revoked', $operation);
+            }
+
+            return \count($events) + $malformed + $ended;
         }, $actor);
 
         foreach (GrantTarget::cases() as $kind) {
