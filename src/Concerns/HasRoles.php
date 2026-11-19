@@ -195,11 +195,11 @@ trait HasRoles // @phpstan-ignore trait.unused
      * Only roles granted in the current tenant, or platform-wide, count. They
      * are read on the write connection once per model instance and scope, and
      * kept as its roles relation; a roles relation loaded any other way, or
-     * read in another tenant or application, is read again, since it may have
-     * come from a read replica or hold another scope's grants. A role held
-     * through a break-glass activation counts as a role granted does, but not
-     * for an instance whose activations do not count (see
-     * `BreakGlassActivations::isCounted()`).
+     * read in another tenant or application, or before a change to the tenant
+     * tree was reported, is read again, since it may have come from a read
+     * replica or hold another scope's grants. A role held through a break-glass
+     * activation counts as a role granted does, but not for an instance whose
+     * activations do not count (see `BreakGlassActivations::isCounted()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard

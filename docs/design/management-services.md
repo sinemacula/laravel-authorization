@@ -52,8 +52,12 @@ themselves are described in [Events](events.md).
    the row back under a lock when it was already there. Granting what the grantee holds (the same target, grantee and
    scope) with the same expiry changes nothing and is reported as `GrantOutcome::UNCHANGED`; a concurrent
    duplicate is the same case, so it never surfaces a unique-constraint violation. A role's permissions are attached
-   through the role permission pivot, so guard parity is enforced, inside a savepoint that a concurrent duplicate rolls
-   back alone.
+   through the role permission pivot, so guard parity is enforced. Each insert runs in a savepoint of its own, so a
+   constraint that refuses it rolls back the insert alone and the transaction stays usable on PostgreSQL. A held row a
+   concurrent call removed before it is read back is written afresh, once. A role, permission or policy deleted before
+   or while it is granted is refused with `InvalidGrantTargetException` on every driver, as is a role deleted while a
+   permission is granted to it, and a grant whose row a concurrent change kept from being written with
+   `UnwrittenGrantException`, which is safe to retry; either way nothing is written and no event is dispatched.
 
 4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on a
    live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry, re-arms a
@@ -122,8 +126,9 @@ themselves are described in [Events](events.md).
     carry no foreign key. A soft-deleted role keeps them until it is force-deleted.
 
 11. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
-   tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
-   that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
+   tenant's and the platform's alike; a permission named for a role answers among those visible in the role's tenant, or
+   the platform's alone for a platform role. A revocation by name revokes each of them the grantee or role holds, and a
+   sync that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
 12. **A resource's policies are attached like grants.** `ResourcePolicyService::attach()` writes a row of
     `resource_policies`: the policy, the resource's morph type and its key (null for the whole type), and the scope,

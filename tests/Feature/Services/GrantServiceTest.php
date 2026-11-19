@@ -54,6 +54,7 @@ use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
@@ -81,6 +82,7 @@ use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\DeclaresPermissions;
+use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -115,8 +117,9 @@ use Tests\TestCase;
 final class GrantServiceTest extends TestCase
 {
     use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions,
-        CatchesRefusals, ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents,
-        RecordsRowLocks, RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
+        CatchesRefusals, ComparesReferences, DeclaresPermissions, InterleavesWrites, RacesDelegatedCalls,
+        ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection,
+        WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -3080,6 +3083,80 @@ final class GrantServiceTest extends TestCase
         }
 
         self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * Granting or syncing a role or permission whose row is gone, as a model
+     * read before it was deleted, is refused as gone on every driver, with
+     * nothing written and nothing dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleOrPermissionWhoseRowIsGoneIsRefused(): void
+    {
+        $user       = self::user();
+        $role       = self::role('gone');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        DB::table('roles')->where('id', $role->id)->delete();
+        DB::table('permissions')->where('id', $permission->id)->delete();
+
+        Event::fake([RoleAssigned::class, PermissionGranted::class]);
+
+        $calls = [
+            'role'       => [static fn () => self::service()->grantRole($user, $role), static fn () => self::service()->syncRoles($user, [$role])],
+            'permission' => [static fn () => self::service()->grantPermission($user, $permission), static fn () => self::service()->syncPermissions($user, [$permission])],
+        ];
+
+        foreach ($calls as $kind => $refused) {
+            foreach ($refused as $call) {
+                $exception = self::refusalOf($call);
+
+                self::assertInstanceOf(InvalidGrantTargetException::class, $exception);
+                self::assertSame($kind, $exception->getKind());
+            }
+        }
+
+        Event::assertNotDispatched(RoleAssigned::class);
+        Event::assertNotDispatched(PermissionGranted::class);
+        self::assertSame(0, DB::table('authorizable_roles')->count() + DB::table('authorizable_permissions')->count());
+    }
+
+    /**
+     * A grant whose row a concurrent call keeps removing, even once the write
+     * is tried again, is refused as not written: the call rolls back and
+     * nothing is dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantThatIsNotWrittenIsRefused(): void
+    {
+        $user = self::user();
+        $role = self::role('editor');
+
+        self::service()->grantRole($user, $role);
+
+        $row = (array) DB::table('authorizable_roles')->sole();
+
+        self::interleaveWrites('authorizable_roles', static function (): void {
+            DB::table('authorizable_roles')->delete();
+        }, static function () use ($row): void {
+            DB::table('authorizable_roles')->insert($row);
+        }, 2, 1);
+
+        Event::fake([RoleAssigned::class, RoleExpiryChanged::class]);
+
+        $exception = self::refusalOf(static fn () => self::service()->grantRole($user, $role, Carbon::parse('2026-07-09 12:00:00')));
+
+        self::assertInstanceOf(UnwrittenGrantException::class, $exception);
+        self::assertSame('grant of role \'editor\' to ' . $user->getMorphClass() . ':user-1', $exception->getGrant());
+        Event::assertNotDispatched(RoleAssigned::class);
+        Event::assertNotDispatched(RoleExpiryChanged::class);
+        self::assertSame([$role->id => null], self::expiries());
     }
 
     /**

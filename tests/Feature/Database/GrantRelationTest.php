@@ -184,6 +184,32 @@ final class GrantRelationTest extends TestCase
     }
 
     /**
+     * Grantees whose keys differ only beyond a double's precision each read
+     * only their own grants, alone and in an existence query or count.
+     *
+     * @return void
+     */
+    public function testKeysBeyondADoublesPrecisionReadOnlyTheirOwnGrants(): void
+    {
+        $first  = NumberedGrantee::forceCreate(['id' => 9007199254740992, 'name' => 'first']);
+        $second = NumberedGrantee::forceCreate(['id' => 9007199254740993, 'name' => 'second']);
+
+        $first->assignRole(Role::create(['name' => 'editor']));
+        $second->assignRole(Role::create(['name' => 'viewer']));
+
+        $holders = static fn (string $role): array => NumberedGrantee::query()
+            ->whereHas('roles', static fn (Builder $query): Builder => $query->where($query->qualifyColumn('name'), $role))
+            ->pluck('name')
+            ->all();
+
+        self::assertSame(['editor'], $first->roles()->pluck('name')->all());
+        self::assertSame(['viewer'], $second->roles()->pluck('name')->all());
+        self::assertSame(['first'], $holders('editor'));
+        self::assertSame(['second'], $holders('viewer'));
+        self::assertSame(['first' => 1, 'second' => 1], NumberedGrantee::query()->withCount('roles')->orderBy('id')->pluck('roles_count', 'name')->all());
+    }
+
+    /**
      * Eager-loading the roles of several grantees in a tenant gives each only
      * its own live grants there and its own live activations there.
      *

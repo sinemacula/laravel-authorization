@@ -368,7 +368,7 @@ final class ResolutionCacheTest extends TestCase
         }
 
         self::assertSame(2, $this->resolutions);
-        self::assertIsArray($this->store->get('authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:app:mobile'));
+        self::assertIsArray($this->store->get('authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:app=mobile'));
     }
 
     /**

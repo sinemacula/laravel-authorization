@@ -130,6 +130,27 @@ final class ConditionClassifierTest extends TestCase
     }
 
     /**
+     * A `like` value too long for `fnmatch()` is `wrong_type` and a substituted
+     * operand that long `undecidable`; other string operators test a long
+     * value, so their empty substituted operand stays `undecidable`.
+     *
+     * @return void
+     */
+    public function testALikeStringTooLongToTest(): void
+    {
+        $long     = \str_repeat('a', \PHP_MAXPATHLEN);
+        $operand  = '${input.operand}';
+        $outcomes = static fn (array $conditions, array $input): array => \array_map(
+            static fn (ConditionResult $test): ConditionOutcome => $test->outcome,
+            self::tests($conditions, $input),
+        );
+
+        self::assertSame([ConditionOutcome::WRONG_TYPE], $outcomes(['like' => ['input.path' => '*']], ['path' => $long]));
+        self::assertSame([ConditionOutcome::UNDECIDABLE], $outcomes(['like' => ['input.path' => $operand]], ['path' => 'a', 'operand' => $long]));
+        self::assertSame([ConditionOutcome::UNDECIDABLE], $outcomes(['starts_with' => ['input.path' => $operand]], ['path' => $long, 'operand' => '']));
+    }
+
+    /**
      * Every reference of an operand that cannot be resolved is named, not only
      * the first.
      *
