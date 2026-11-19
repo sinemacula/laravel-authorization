@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use Tests\Concerns\MeasuresTime;
 
 /**
@@ -55,5 +56,39 @@ final class EvaluatorThroughputTest extends TestCase
         $elapsed = microtime(true) - $start;
 
         $this->assertWithinBudget(0.5, $elapsed, "Evaluator budget exceeded ({$elapsed}s).");
+    }
+
+    /**
+     * A policy at the statement and condition limits, every statement naming
+     * the action but only the last one's conditions holding, is evaluated 10
+     * times in under 1.5s. It is larger than the default byte limit admits, so
+     * it bounds every admissible policy.
+     *
+     * @return void
+     */
+    public function testCanEvaluateAPolicyAtTheStatementAndConditionLimitsQuickly(): void
+    {
+        $limits = new PolicyLimits;
+        $values = \array_fill_keys(\array_map(static fn (int $i): string => "k{$i}", \range(1, $limits->conditions)), 'v');
+        $tests  = \array_combine(\array_map(static fn (string $key): string => "input.{$key}", \array_keys($values)), $values);
+        $missed = ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => [...$tests, "input.k{$limits->conditions}" => 'x']]];
+
+        $statements   = \array_fill(0, $limits->statements - 1, $missed);
+        $statements[] = ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => $tests]];
+
+        $policy    = Policy::fromArray(['name' => 'limits', 'statements' => $statements]);
+        $context   = ['input' => $values];
+        $evaluator = new PolicyEvaluator;
+
+        self::assertTrue($evaluator->evaluate([$policy], 'posts:read', null, $context)->isAllowed());
+        self::assertFalse($evaluator->evaluate([$policy], 'posts:read', null, ['input' => [...$values, "k{$limits->conditions}" => 'y']])->isAllowed());
+
+        $elapsed = $this->fastestOf(3, static function () use ($evaluator, $policy, $context): void {
+            for ($i = 0; $i < 10; $i++) {
+                $evaluator->evaluate([$policy], 'posts:read', null, $context);
+            }
+        });
+
+        $this->assertWithinBudget(1.5, $elapsed, "Evaluator budget at the policy limits exceeded ({$elapsed}s for 10 checks).");
     }
 }

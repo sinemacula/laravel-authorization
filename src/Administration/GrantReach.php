@@ -124,7 +124,8 @@ final readonly class GrantReach
      * Return the tenants below the tenant, as the tree's subtree query selects
      * them, the tenant itself among them when the query selects it; for a flat
      * tree, none, without a query, since the tenant's chain already holds the
-     * tenant.
+     * tenant. The query runs in a savepoint of its own, so one that fails as it
+     * runs leaves the caller's transaction usable on PostgreSQL.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
@@ -147,7 +148,7 @@ final readonly class GrantReach
 
         $below = [];
 
-        foreach ($query->get() as $row) {
+        foreach ($query->getConnection()->transaction(static fn (): iterable => $query->get()) as $row) {
             $below[] = self::tenantOf((array) $row, $tree);
         }
 

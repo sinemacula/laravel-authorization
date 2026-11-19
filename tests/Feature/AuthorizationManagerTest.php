@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -79,6 +80,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\LagsTheReadConnection;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
@@ -123,7 +125,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use CatchesRefusals, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
+    use CatchesRefusals, LagsTheReadConnection, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
 
     /**
      * A role granted in an organisation allows in an account below it and not
@@ -422,6 +424,52 @@ final class AuthorizationManagerTest extends TestCase
         $user->detachPolicy($policy);
 
         self::assertTrue(Authorization::for($user)->can('posts:delete'));
+    }
+
+    /**
+     * A check reads every grant, boundary and guardrail on the write
+     * connection, so a read replica that lags never admits a revoked permission
+     * or policy, or misses a new cap.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChecksReadTheWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $ids = ['direct', 'via-role', 'via-policy', 'bounded', 'railed'];
+
+        [$direct, $viaRole, $viaPolicy, $bounded, $railed] = \array_map(static fn (string $id): StubGrantee => StubGrantee::create(['id' => $id]), $ids);
+
+        $direct->givePermission(Permission::create(['name' => 'posts:edit']));
+        $reviewer = Role::create(['name' => 'reviewer'])->givePermission(Permission::create(['name' => 'posts:review']));
+        $archive  = self::resourcePolicy('archive', [['effect' => 'allow', 'actions' => ['posts:archive']]]);
+        $readOnly = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $archiver = Role::create(['name' => 'archiver'])->attachPolicy($archive)->attachPolicy($readOnly);
+        $viaRole->assignRole($reviewer);
+        $viaPolicy->assignRole($archiver);
+        $bounded->givePermission(Permission::create(['name' => 'posts:publish']));
+        $railed->givePermission(Permission::create(['name' => 'posts:delete']));
+        $actor = self::guardrailManager();
+
+        self::lagTheReadConnection();
+
+        $direct->revokePermission('posts:edit');
+        $reviewer->revokePermission('posts:review');
+        $archiver->detachPolicy($archive);
+        self::boundaries()->set($bounded, $readOnly);
+
+        self::assertFalse(Authorization::for($direct)->can('posts:edit'));
+        self::assertFalse(Authorization::for($viaRole)->can('posts:review'));
+        self::assertFalse(Authorization::for($viaPolicy)->can('posts:archive'));
+        self::assertFalse(Authorization::for($bounded)->can('posts:publish'));
+        self::assertTrue(Authorization::for($railed)->can('posts:delete'));
+
+        self::guardrails()->set($readOnly, null, ActingContext::for($actor));
+
+        self::assertFalse(Authorization::for($railed)->can('posts:delete'));
     }
 
     /**
@@ -1374,6 +1422,36 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame('web', $subject->guard);
         self::assertSame('web', $subject->application);
         self::assertTrue(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::can('posts:delete'));
+    }
+
+    /**
+     * A sign-in mid-request decides the next check about the new user, and a
+     * sign-out denies it.
+     *
+     * @return void
+     */
+    public function testSigningInOrOutMidRequestDecidesTheNextCheck(): void
+    {
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+        Permission::create(['name' => 'posts:delete', 'guard' => 'web']);
+
+        $author = AuthenticatableGrantee::create(['id' => 'author'])->givePermission('posts:create');
+        $editor = AuthenticatableGrantee::create(['id' => 'editor'])->givePermission('posts:delete');
+
+        self::assertFalse(Authorization::can('posts:create'));
+
+        $this->actingAs($author);
+
+        self::assertTrue(Authorization::can('posts:create'));
+
+        Auth::login($editor);
+
+        self::assertFalse(Authorization::can('posts:create'));
+        self::assertTrue(Authorization::can('posts:delete'));
+
+        Auth::logout();
+
         self::assertFalse(Authorization::can('posts:delete'));
     }
 
@@ -2639,6 +2717,44 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue(Authorization::can('posts:read'));
         self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
         self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:publish')->reason);
+    }
+
+    /**
+     * A resource is capped by the boundaries of the tenant it is decided in: a
+     * child tenant's for its own resources, and the platform-wide ones alone
+     * once a check falls back to platform scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBoundariesFollowTheTenantTheCheckIsDecidedIn(): void
+    {
+        [$org, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        foreach (['posts:read', 'posts:edit', 'posts:delete'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]));
+        }
+
+        $readOnly = [['effect' => 'allow', 'actions' => ['posts:read']]];
+
+        self::boundaries()->set($user, self::resourcePolicy('platform-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+        self::boundaries()->set($user, self::resourcePolicy('account-cap', $readOnly), $account);
+        self::boundaries()->set($user, self::resourcePolicy('sibling-cap', $readOnly), $sibling);
+
+        $this->resolveInTenant($user, $org);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit', self::postIn($account))->reason);
+        self::assertTrue(Authorization::can('posts:read', self::postIn($account)));
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($org)));
+
+        $this->resolveInTenant($user, $account);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($sibling)));
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:delete', self::postIn($sibling))->reason);
     }
 
     /**

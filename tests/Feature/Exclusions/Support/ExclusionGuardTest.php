@@ -31,6 +31,7 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RacesAnotherSession;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubGrantee;
@@ -55,13 +56,10 @@ use Tests\TestCase;
 #[CoversClass(ExclusionGuard::class)]
 final class ExclusionGuardTest extends TestCase
 {
-    use ActivatesBreakGlass, ActsAsAdministrator, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks;
+    use ActivatesBreakGlass, ActsAsAdministrator, CatchesRefusals, ComparesReferences, RacesAnotherSession, ReadsDispatchedEvents, RecordsRowLocks;
 
     /** @var string The type of the stub tenants. */
     private const string TENANT = 'stub_tenant';
-
-    /** @var string The name of the second session's connection. */
-    private const string OTHER = 'bl71b_concurrent';
 
     /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
     private const array RACED = [
@@ -71,6 +69,9 @@ final class ExclusionGuardTest extends TestCase
         'testGrantsOfRolesInOverlappingPairsQueue',
         'testAParentQueuesBehindAGrantAPairTouches',
     ];
+
+    /** @var list<string> The tables a race writes, emptied once it ends. */
+    private const array TABLES = ['role_exclusions', 'authorizable_roles', 'roles', 'stub_grantees'];
 
     /**
      * Put the stub tenants in a tree: `child` and `grandchild` below `parent`,
@@ -529,7 +530,7 @@ final class ExclusionGuardTest extends TestCase
      */
     public function testGrantsOfAPairsRolesQueue(): void
     {
-        $this->raceOrSkip(static function (): void {
+        $this->raceOrSkip(self::TABLES, static function (): void {
             $clerk   = Role::query()->create(['name' => 'clerk']);
             $auditor = Role::query()->create(['name' => 'auditor']);
             $first   = StubGrantee::query()->create(['id' => 'first']);
@@ -537,8 +538,18 @@ final class ExclusionGuardTest extends TestCase
 
             self::exclusions()->declare($clerk, $auditor);
 
-            self::assertWaits(static fn () => self::grants()->grantRole($first, $clerk), static fn () => self::grants()->grantRole($second, $clerk));
-            self::assertWaits(static fn () => self::grants()->grantRole($second, $clerk), static fn () => self::grants()->grantRole($first, $auditor));
+            self::assertWaits(
+                'insert',
+                'authorizable_roles',
+                static fn () => self::grants()->grantRole($first, $clerk),
+                static fn () => self::grants()->grantRole($second, $clerk),
+            );
+            self::assertWaits(
+                'insert',
+                'authorizable_roles',
+                static fn () => self::grants()->grantRole($second, $clerk),
+                static fn () => self::grants()->grantRole($first, $auditor),
+            );
             self::assertSame(2, self::grantsOf($clerk));
             self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => self::grants()->grantRole($first, $auditor)));
         });
@@ -555,7 +566,7 @@ final class ExclusionGuardTest extends TestCase
      */
     public function testGrantsOfRolesInOverlappingPairsQueue(): void
     {
-        $this->raceOrSkip(static function (): void {
+        $this->raceOrSkip(self::TABLES, static function (): void {
             [$first, $second, $third] = self::keyedRoles(['first', 'second', 'third']);
 
             $user = StubGrantee::query()->create(['id' => 'user']);
@@ -564,7 +575,7 @@ final class ExclusionGuardTest extends TestCase
             self::exclusions()->declare($first, $third);
             self::exclusions()->declare($second, $third);
 
-            self::assertWaits(static fn () => self::grants()->grantRole($user, $second), static fn () => self::grants()->grantRole($user, $third));
+            self::assertWaits('insert', 'authorizable_roles', static fn () => self::grants()->grantRole($user, $second), static fn () => self::grants()->grantRole($user, $third));
             self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => self::grants()->grantRole($user, $third)));
             self::assertSame([1, 0], [self::grantsOf($second), self::grantsOf($third)]);
         });
@@ -581,7 +592,7 @@ final class ExclusionGuardTest extends TestCase
      */
     public function testAParentQueuesBehindAGrantAPairTouches(): void
     {
-        $this->raceOrSkip(static function (): void {
+        $this->raceOrSkip(self::TABLES, static function (): void {
             [$clerk, $intern, $auditor, $approver, $trainee] = self::keyedRoles(['clerk', 'intern', 'auditor', 'approver', 'trainee']);
 
             $user = StubGrantee::query()->create(['id' => 'user']);
@@ -591,7 +602,12 @@ final class ExclusionGuardTest extends TestCase
             self::exclusions()->declare($auditor, $approver);
             self::grants()->grantRole($user, $trainee);
 
-            self::assertWaits(static fn () => self::grants()->grantRole($user, $approver), static fn () => self::roles()->setParent($trainee, $auditor));
+            self::assertWaits(
+                'insert',
+                'authorizable_roles',
+                static fn () => self::grants()->grantRole($user, $approver),
+                static fn () => self::roles()->setParent($trainee, $auditor),
+            );
             self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => self::roles()->setParent($trainee, $auditor)));
             self::assertNull($trainee->refresh()->parent_id);
         });
@@ -635,7 +651,7 @@ final class ExclusionGuardTest extends TestCase
      */
     public function testAGrantSeesAPairCommittedAfterItsFirstRead(): void
     {
-        $this->raceOrSkip(static function (): void {
+        $this->raceOrSkip(self::TABLES, static function (): void {
             $clerk   = Role::query()->create(['name' => 'clerk']);
             $auditor = Role::query()->create(['name' => 'auditor']);
             $user    = StubGrantee::query()->create(['id' => 'user']);
@@ -667,7 +683,7 @@ final class ExclusionGuardTest extends TestCase
      */
     public function testAGrantSeesAParentCommittedAfterItsFirstRead(): void
     {
-        $this->raceOrSkip(static function (): void {
+        $this->raceOrSkip(self::TABLES, static function (): void {
             [$clerk, $auditor] = self::declared();
 
             $intern = Role::query()->create(['name' => 'intern']);
@@ -705,8 +721,8 @@ final class ExclusionGuardTest extends TestCase
 
         // A second connection on the test's session, so the test's own
         // transaction is not one the package's connection has open.
-        config(['database.connections.' . self::OTHER => DB::connection()->getConfig(), 'authorization.connection' => self::OTHER]);
-        DB::connection(self::OTHER)->setPdo(DB::connection()->getPdo());
+        config(['database.connections.' . self::OTHER_SESSION => DB::connection()->getConfig(), 'authorization.connection' => self::OTHER_SESSION]);
+        DB::connection(self::OTHER_SESSION)->setPdo(DB::connection()->getPdo());
 
         $refusal = self::refusalOf(static fn () => $intern->forceFill(['parent_id' => $auditor->id])->save());
 
@@ -742,109 +758,6 @@ final class ExclusionGuardTest extends TestCase
         $connections = parent::connectionsToTransact();
 
         return $isRaced ? [] : $connections;
-    }
-
-    /**
-     * Run the race on MySQL and PostgreSQL, outside the test's transaction,
-     * with a second session on the package's connection, deleting what it
-     * stored once it ends; SQLite, which has one writer, skips it.
-     *
-     * @param  \Closure(): void  $race
-     * @return void
-     *
-     * @throws \Throwable
-     */
-    private function raceOrSkip(\Closure $race): void
-    {
-        $connection = DB::connection();
-
-        if ($connection->getDriverName() === 'sqlite') {
-            self::markTestSkipped('SQLite has one writer, so nothing commits while a grant runs.');
-        }
-
-        config(['database.connections.' . self::OTHER => $connection->getConfig()]);
-
-        try {
-            $race();
-        } finally {
-            DB::table('roles')->update(['parent_id' => null]);
-
-            foreach (['role_exclusions', 'authorizable_roles', 'roles', 'stub_grantees'] as $table) {
-                DB::table($table)->delete();
-            }
-
-            DB::purge(self::OTHER);
-        }
-    }
-
-    /**
-     * Run the grant, committing the change on a second session once the grant
-     * has made its first read inside its transaction, which fixes its snapshot
-     * on MySQL.
-     *
-     * @param  \Closure(): mixed  $grant
-     * @param  \Closure(\Illuminate\Database\Connection): mixed  $change
-     * @return mixed
-     */
-    private static function afterFirstRead(\Closure $grant, \Closure $change): mixed
-    {
-        $package = DB::connection();
-        $isDone  = false;
-
-        DB::listen(static function (QueryExecuted $query) use ($package, $change, &$isDone): void {
-            if ($isDone || $query->connectionName !== $package->getName() || $package->transactionLevel() === 0 || !\str_starts_with(\strtolower($query->sql), 'select')) {
-                return;
-            }
-
-            $isDone = true;
-
-            $change(DB::connection(self::OTHER));
-        });
-
-        return $grant();
-    }
-
-    /**
-     * Run the write and, once it has written its grant, run the concurrent
-     * write on a second session that waits no longer than a second for a lock,
-     * rolling it back, and assert it waited for the first until it gave up.
-     *
-     * @param  \Closure(): mixed  $write
-     * @param  \Closure(): mixed  $concurrent
-     * @return void
-     */
-    private static function assertWaits(\Closure $write, \Closure $concurrent): void
-    {
-        $package = DB::connection();
-        $other   = DB::connection(self::OTHER);
-        $isDone  = false;
-
-        /** @var \ArrayObject<int, \Throwable> $waited */
-        $waited = new \ArrayObject;
-
-        $other->statement($other->getDriverName() === 'mysql' ? 'set session innodb_lock_wait_timeout = 1' : 'set lock_timeout = \'1s\'');
-
-        DB::listen(static function (QueryExecuted $query) use ($package, $other, $concurrent, $waited, &$isDone): void {
-            if ($isDone || $query->connectionName !== $package->getName() || !\str_starts_with($query->sql, 'insert') || !\str_contains($query->sql, 'authorizable_roles')) {
-                return;
-            }
-
-            $isDone = true;
-
-            config(['authorization.connection' => self::OTHER]);
-            $other->beginTransaction();
-
-            try {
-                $waited->append(self::refusalOf($concurrent));
-            } finally {
-                $other->rollBack();
-                config(['authorization.connection' => null]);
-            }
-        });
-
-        $write();
-
-        self::assertMatchesRegularExpression('/lock timeout|Lock wait timeout/', ($waited->getArrayCopy()[0] ?? null)?->getMessage() ?? '');
     }
 
     /**

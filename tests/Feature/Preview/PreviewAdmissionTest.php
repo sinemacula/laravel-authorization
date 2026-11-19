@@ -7,6 +7,7 @@ namespace Tests\Feature\Preview;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
@@ -18,7 +19,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -302,6 +305,39 @@ final class PreviewAdmissionTest extends TestCase
     }
 
     /**
+     * A query's class of rows is admitted whether it holds rows or not, so a
+     * refusal reveals nothing of a child tenant: with no row below the parent,
+     * a caller holding the right at the parent's node alone, or denied it in
+     * the child, is refused the query as when the child holds rows.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAQueryIsRefusedForAClassOfRowsThatHoldsNone(): void
+    {
+        [$parent, $child] = self::tree();
+
+        $node   = self::previewer('node', false);
+        $denied = self::previewer('denied', false);
+        $target = self::target('target', []);
+        $right  = self::permission(PackagePermissions::SUBJECT_PREVIEW);
+
+        self::grants()->grantPermission($node, $right, tenant: $parent, includeSubtree: false);
+        self::grants()->grantPermission($denied, $right, tenant: $parent);
+        self::grants()->grantPermission($target, self::permission('posts:view'), tenant: $parent);
+        self::denyInTenant($denied, $child);
+
+        TenantScopedPost::query()->create(['title' => 'own', 'tenant_type' => $parent->getMorphClass(), 'tenant_id' => $parent->getKey()]);
+
+        $atNode   = $this->signIn($node, 'session-1', $parent)->previewFor($target);
+        $inParent = $this->signIn($denied, 'session-1', $parent)->previewFor($target);
+
+        self::assertRefused(DecisionReason::NO_MATCH, static fn (): mixed => self::scoped($atNode)->get());
+        self::assertRefused(DecisionReason::EXPLICIT_DENY, static fn (): mixed => self::scoped($inParent)->get());
+    }
+
+    /**
      * A resource of a tenant outside a tenant preview's is decided at platform
      * scope, so its answer is admitted there: a caller holding the right in its
      * own tenant alone is refused it, through a check and a query, until it
@@ -433,6 +469,35 @@ final class PreviewAdmissionTest extends TestCase
         self::assertTrue($manager->previewFor($junior)->can('posts:read'));
         self::assertTrue($this->signIn($caller)->previewFor($junior)->can('posts:read'));
         self::assertRefused(DecisionReason::EXPLICIT_DENY, fn (): mixed => $this->signIn($caller)->previewFor($senior));
+    }
+
+    /**
+     * The previewer's boundary and the guardrails of the preview's tenant cap
+     * the right to preview as they cap any check: a boundary leaving it out
+     * refuses every preview, and a tenant's guardrail leaving it out refuses a
+     * preview in that tenant while one at the platform is still admitted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryOrAGuardrailLeavingOutTheRightRefusesThePreview(): void
+    {
+        $tenant  = self::tenant('t1');
+        $bounded = self::previewer('bounded');
+        $railed  = self::previewer('railed');
+        $target  = self::target();
+        $posts   = Policy::query()->create(['name' => 'posts-only', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
+        $manager = StubGrantee::query()->create(['id' => 'guardrail-admin']);
+
+        $manager->givePermission(self::permission(PackagePermissions::GUARDRAIL_MANAGE));
+
+        BoundaryService::instance()?->set($bounded, $posts);
+        GuardrailService::instance()?->set($posts, $tenant, ActingContext::for($manager));
+
+        self::assertRefused(DecisionReason::BOUNDARY, fn (): mixed => $this->signIn($bounded)->previewFor($target));
+        self::assertRefused(DecisionReason::GUARDRAIL, fn (): mixed => $this->signIn($railed, 'session-1', $tenant)->previewFor($target));
+        self::assertTrue($this->signIn($railed)->previewFor($target)->can('posts:read'));
     }
 
     /**
