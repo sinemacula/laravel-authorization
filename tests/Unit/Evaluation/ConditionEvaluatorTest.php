@@ -529,6 +529,7 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} null value" => [$operator, $hit, null, MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a string value"];
             yield "{$operator} value with a nul byte" => [$operator, $hit, "ab\0c", MatchOutcome::UNDECIDABLE, "operator '{$operator}' cannot test a NUL byte"];
             yield "{$operator} operand with a nul byte" => [$operator, "a\0", 'abc', MatchOutcome::UNDECIDABLE, "operator '{$operator}' cannot test a NUL byte"];
+            yield "{$operator} long value" => [$operator, $hit, \str_repeat('abc', \PHP_MAXPATHLEN), MatchOutcome::MATCHES, ''];
         }
     }
 
@@ -540,6 +541,8 @@ final class ConditionEvaluatorTest extends TestCase
      */
     private static function likeCases(): iterable
     {
+        $tooLong = 'operator \'like\' cannot test a string of ' . \PHP_MAXPATHLEN . ' bytes or more';
+
         yield 'like star' => ['like', 'a*c', 'abbbc', MatchOutcome::MATCHES, ''];
         yield 'like question mark' => ['like', 'a?c', 'abc', MatchOutcome::MATCHES, ''];
         yield 'like miss' => ['like', 'a?c', 'abbc', MatchOutcome::DOES_NOT_MATCH, ''];
@@ -550,6 +553,10 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'like non-string value' => ['like', 'a*', 5, MatchOutcome::UNDECIDABLE, 'operator \'like\' needs a string value'];
         yield 'like value with a nul byte' => ['like', 'curl*', "curl\0", MatchOutcome::UNDECIDABLE, 'operator \'like\' cannot test a NUL byte'];
         yield 'like operand with a nul byte' => ['like', "curl\0*", 'curl', MatchOutcome::UNDECIDABLE, 'operator \'like\' cannot test a NUL byte'];
+        yield 'like value under the length limit' => ['like', '*', \str_repeat('a', \PHP_MAXPATHLEN - 1), MatchOutcome::MATCHES, ''];
+        yield 'like value at the length limit' => ['like', '*', \str_repeat('a', \PHP_MAXPATHLEN), MatchOutcome::UNDECIDABLE, $tooLong];
+        yield 'like operand under the length limit' => ['like', \str_repeat('a', \PHP_MAXPATHLEN - 1), \str_repeat('a', \PHP_MAXPATHLEN - 1), MatchOutcome::MATCHES, ''];
+        yield 'like operand at the length limit' => ['like', \str_repeat('a', \PHP_MAXPATHLEN), 'a', MatchOutcome::UNDECIDABLE, $tooLong];
     }
 
     /**

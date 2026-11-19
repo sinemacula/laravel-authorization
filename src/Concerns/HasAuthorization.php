@@ -41,8 +41,9 @@ trait HasAuthorization // @phpstan-ignore trait.unused
     }
 
     /**
-     * Remove the grantee's grants once the model is deleted, through the grant
-     * service, so each revocation is reported. A soft delete keeps them.
+     * Remove the grantee's grants and end its break-glass activations once the
+     * model is deleted, through the grant service, so each is reported. A soft
+     * delete keeps them.
      *
      * @return void
      */
