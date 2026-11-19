@@ -37,7 +37,24 @@ final class PrincipalCacheKeyTest extends TestCase
         $user = new StubGrantee(['id' => 'ann']);
 
         self::assertSame(StubGrantee::class . ':ann', PrincipalCacheKey::for($user));
-        self::assertStringStartsWith('stdClass:obj:', PrincipalCacheKey::for(new \stdClass));
+        $first  = new \stdClass;
+        $second = new \stdClass;
+
+        self::assertMatchesRegularExpression('/^stdClass:%obj[0-9a-f]{32}$/', PrincipalCacheKey::for($first));
+        self::assertNotSame(PrincipalCacheKey::for($first), PrincipalCacheKey::for($second));
+    }
+
+    /**
+     * A '%' or ':' in a principal's type or key is escaped, so no two
+     * principals share a key.
+     *
+     * @return void
+     */
+    public function testAPrincipalsTypeAndKeyAreEscaped(): void
+    {
+        self::assertSame('a%3Ab:c', PrincipalCacheKey::for(new Reference('a:b', 'c')));
+        self::assertSame('a:b%3Ac', PrincipalCacheKey::for(new Reference('a', 'b:c')));
+        self::assertSame('a%25:b%253A', PrincipalCacheKey::for(new Reference('a%', 'b%3A')));
     }
 
     /**

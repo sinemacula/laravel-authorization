@@ -50,6 +50,21 @@ final class VersionedStoreTest extends TestCase
     }
 
     /**
+     * A '%' or ':' in a tenant's type or key is escaped, so no two tenants
+     * share a version.
+     *
+     * @return void
+     */
+    public function testATenantsTypeAndKeyAreEscaped(): void
+    {
+        $store = new VersionedStore(new Repository(new ArrayStore), 'authz');
+
+        self::assertSame('authz:version:tenant:a%3Ab:c', $store->tenantKey(new Reference('a:b', 'c')));
+        self::assertSame('authz:version:tenant:a:b%3Ac', $store->tenantKey(new Reference('a', 'b:c')));
+        self::assertSame('authz:version:tenant:a%25:b%253A', $store->tenantKey(new Reference('a%', 'b%3A')));
+    }
+
+    /**
      * An entry is stored for the given number of seconds and read back.
      *
      * @return void

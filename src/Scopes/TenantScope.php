@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
+use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -137,8 +138,7 @@ final class TenantScope implements Scope
     public static function scopeKey(): string
     {
         $scope = self::whileResolving(static function (ResolvedTenant $resolved): string {
-            $escape      = static fn (string $value): string => \strtr($value, ['%' => '%25', ':' => '%3A']);
-            $application = $resolved->application === null ? 'every' : 'app=' . $escape($resolved->application);
+            $application = $resolved->application === null ? 'every' : 'app=' . PrincipalCacheKey::escape($resolved->application);
 
             if ($resolved->tenant === null) {
                 return 'platform:' . $application;
@@ -146,7 +146,7 @@ final class TenantScope implements Scope
 
             $below = $resolved->isBelow ? ':below' : '';
 
-            return \implode(':', \array_map($escape, self::extractTenantPair($resolved->tenant))) . $below . ':' . $application;
+            return \implode(':', \array_map(PrincipalCacheKey::escape(...), self::extractTenantPair($resolved->tenant))) . $below . ':' . $application;
         });
 
         return $scope ?? 'platform:every';
