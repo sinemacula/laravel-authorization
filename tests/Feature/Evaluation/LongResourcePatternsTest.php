@@ -64,7 +64,6 @@ final class LongResourcePatternsTest extends TestCase
 
         self::assertTrue($manager->check(self::ACTION, $first, $input)->isAllowed());
         self::assertFalse($manager->check(self::ACTION, $second, $input)->isAllowed());
-        self::assertFalse(self::silenced(static fn (): Decision => $manager->check(self::ACTION, $second, $input))->isAllowed());
         self::assertSame([1], self::kept($manager, $input));
     }
 

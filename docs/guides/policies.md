@@ -149,9 +149,9 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 - A NUL byte is refused in a `starts_with`, `ends_with`, `like` or time operand and in a resource pattern, and a
   context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${...}` value holding one leaves
   a resource pattern unresolved.
-- A resource pattern of `PHP_MAXPATHLEN` bytes or more once resolved (1024 on macOS, 4096 on Linux) is unresolved, since
-  `fnmatch()` cannot test it, so a deny on a long `${input.*}` id applies. A resource identifier that long denies the
-  check as `invalid_policy` whenever a statement matches a pattern against it.
+- A resource pattern of `PHP_MAXPATHLEN` bytes or more once resolved and escaped (1024 on macOS, 4096 on Linux) is
+  unresolved, since `fnmatch()` cannot test it, so a deny on a long `${input.*}` id applies. A resource identifier that
+  long denies the check as `invalid_policy` whenever a statement matches a pattern against it.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${...}` interpolation; list operands

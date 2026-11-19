@@ -98,9 +98,11 @@ final class StatementScreenTest extends TestCase
     {
         [$screen, $subject] = $this->screen();
         $unresolved         = new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.missing}:*', '${input.nul}', '${input.long}']);
+        $long               = new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.long}']);
         $negated            = new Statement(PolicyEffect::ALLOW, ['posts:view'], null, notResources: ['${input.missing}']);
 
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $unresolved));
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $long));
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $negated));
         self::assertSame(QueryAuthorizer::EVERY_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.type}:*']))[0]);
 
