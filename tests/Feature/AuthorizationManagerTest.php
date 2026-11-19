@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -1421,6 +1422,36 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame('web', $subject->guard);
         self::assertSame('web', $subject->application);
         self::assertTrue(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::can('posts:delete'));
+    }
+
+    /**
+     * A sign-in mid-request decides the next check about the new user, and a
+     * sign-out denies it.
+     *
+     * @return void
+     */
+    public function testSigningInOrOutMidRequestDecidesTheNextCheck(): void
+    {
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+        Permission::create(['name' => 'posts:delete', 'guard' => 'web']);
+
+        $author = AuthenticatableGrantee::create(['id' => 'author'])->givePermission('posts:create');
+        $editor = AuthenticatableGrantee::create(['id' => 'editor'])->givePermission('posts:delete');
+
+        self::assertFalse(Authorization::can('posts:create'));
+
+        $this->actingAs($author);
+
+        self::assertTrue(Authorization::can('posts:create'));
+
+        Auth::login($editor);
+
+        self::assertFalse(Authorization::can('posts:create'));
+        self::assertTrue(Authorization::can('posts:delete'));
+
+        Auth::logout();
+
         self::assertFalse(Authorization::can('posts:delete'));
     }
 

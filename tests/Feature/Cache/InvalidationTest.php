@@ -26,11 +26,13 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
@@ -47,6 +49,8 @@ use Tests\TestCase;
 #[CoversClass(Invalidation::class)]
 final class InvalidationTest extends TestCase
 {
+    use ActsAsAdministrator;
+
     /**
      * Keep entries in the array store.
      *
@@ -296,6 +300,75 @@ final class InvalidationTest extends TestCase
         $this->nextRequest();
 
         self::assertSame('deny', $this->fresh($user)->getPolicies()[0]->statements[0]->effect->value);
+    }
+
+    /**
+     * A direct revocation, a role revocation and a role's permission revoked
+     * each deny the next request's check, though the store held the allow.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationDeniesTheNextRequestsCheck(): void
+    {
+        $user      = StubGrantee::create(['id' => 'user-1']);
+        $editor    = Role::create(['name' => 'editor']);
+        $publisher = Role::create(['name' => 'publisher']);
+        $roles     = $this->app?->make(RoleService::class);
+
+        self::assertNotNull($roles);
+
+        $editor->givePermission(Permission::create(['name' => 'posts:edit']));
+        $publisher->givePermission(Permission::create(['name' => 'posts:publish']));
+        $user->givePermission(Permission::create(['name' => 'posts:read']))->assignRole($editor)->assignRole($publisher);
+
+        self::assertTrue($this->can($user, 'posts:read'));
+
+        $this->fresh($user)->revokePermission('posts:read');
+
+        self::assertFalse($this->can($user, 'posts:read'));
+        self::assertTrue($this->can($user, 'posts:edit'));
+
+        $this->fresh($user)->revokeRole($editor);
+
+        self::assertFalse($this->can($user, 'posts:edit'));
+        self::assertTrue($this->can($user, 'posts:publish'));
+
+        $roles->revokePermission($publisher, 'posts:publish');
+
+        self::assertFalse($this->can($user, 'posts:publish'));
+    }
+
+    /**
+     * A policy attached to a resource, and a revocation made by an
+     * administrator, each deny the next request's check, though the store held
+     * the allow.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentOrADelegatedWriteDeniesTheNextRequestsCheck(): void
+    {
+        $user     = StubGrantee::create(['id' => 'user-1']);
+        $resource = ResourcePolicyService::instance();
+        $admin    = self::administrator(['authorization:*', 'posts:comment']);
+
+        self::assertNotNull($resource);
+
+        $user->givePermission(Permission::create(['name' => 'posts:share']))->givePermission('posts:comment');
+
+        self::assertTrue($this->can($user, 'posts:share', ['posts', '7']));
+
+        $resource->attach(Policy::create(['name' => 'unshared', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:share']]]]]), ['posts', '7']);
+
+        self::assertFalse($this->can($user, 'posts:share', ['posts', '7']));
+        self::assertTrue($this->can($user, 'posts:comment'));
+
+        $this->fresh($user)->revokePermission('posts:comment', actor: $admin);
+
+        self::assertFalse($this->can($user, 'posts:comment'));
     }
 
     /**
@@ -566,6 +639,21 @@ final class InvalidationTest extends TestCase
     private function nextRequest(): void
     {
         $this->app?->forgetInstance(ResolutionCache::class);
+    }
+
+    /**
+     * Decide the check about the identity in a new request.
+     *
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @param  string  $action
+     * @param  mixed  $resource
+     * @return bool
+     */
+    private function can(StubGrantee $user, string $action, mixed $resource = null): bool
+    {
+        $this->nextRequest();
+
+        return Authorization::for($this->fresh($user))->can($action, $resource);
     }
 
     /**
