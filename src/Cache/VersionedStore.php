@@ -153,7 +153,7 @@ final class VersionedStore
      */
     public function tenantKey(Reference $tenant): string
     {
-        return "{$this->prefix}:version:tenant:{$tenant->type}:{$tenant->id}";
+        return "{$this->prefix}:version:tenant:" . PrincipalCacheKey::escape($tenant->type) . ':' . PrincipalCacheKey::escape($tenant->id);
     }
 
     /**

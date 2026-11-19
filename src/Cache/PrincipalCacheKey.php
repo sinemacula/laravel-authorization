@@ -14,7 +14,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * Eloquent models use their canonical `getMorphClass()` + `getKey()` pairing.
  * Non-Eloquent principals are duck-typed on those same accessors; principals
  * exposing neither fall back to a per-request `spl_object_hash()`, in which
- * case only the in-memory memo applies.
+ * case only the in-memory memo applies. Each part has its '%' and ':' escaped,
+ * so no two principals, nor a principal and the scope after it, share a key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,7 +68,18 @@ final class PrincipalCacheKey
      */
     public static function for(object $principal): string
     {
-        return self::type($principal) . ':' . self::id($principal);
+        return self::escape(self::type($principal)) . ':' . self::id($principal);
+    }
+
+    /**
+     * Escape '%' and ':' in one part of a key, so the parts can be told apart.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    public static function escape(string $value): string
+    {
+        return \strtr($value, ['%' => '%25', ':' => '%3A']);
     }
 
     /**
@@ -103,10 +115,11 @@ final class PrincipalCacheKey
             $raw = $principal->getKey();
 
             if ((\is_string($raw) || \is_int($raw)) && (string) $raw !== '') {
-                return (string) $raw;
+                return self::escape((string) $raw);
             }
         }
 
-        return 'obj:' . \spl_object_hash($principal);
+        // An escaped key never holds '%o', so none matches this one.
+        return '%obj' . \spl_object_hash($principal);
     }
 }

@@ -87,6 +87,9 @@ is a random token kept in the store under `{prefix}:version:`, which a write bum
 | `boundaries`               | Every entry of a grantee's boundaries                            |
 | `guardrails`               | Every entry of the guardrails                                    |
 
+A `%` or `:` in a grantee's or tenant's type or key is written `%25` or `%3A`, in an entry's key as in a version's, so
+no two grantees or tenants share one.
+
 The tokens are random rather than counters, so a token the store evicts and creates again never matches an entry
 recorded before it. The layout is the package's own: read it to inspect a store, never write to it.
 

@@ -17,10 +17,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\RequestState;
+use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FoundationUser;
 use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSecondGrantee;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -40,6 +42,8 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 final class PolymorphicGranteeTest extends TestCase
 {
+    use ActsAsTenant;
+
     /**
      * Two unrelated grantee models share a role and are granted the same
      * permission without any model-class collisions.
@@ -110,6 +114,34 @@ final class PolymorphicGranteeTest extends TestCase
         $this->startRequest();
 
         self::assertSame([false, false, false], self::decisions($client), 'store');
+    }
+
+    /**
+     * A grantee whose key holds a colon is never served the entries of one
+     * whose key and tenant spell the same text, nor the reverse.
+     *
+     * @return void
+     */
+    public function testAColonInAGranteeKeyNeverSharesAnotherGranteesEntries(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 'platform']);
+        $plain  = StubGrantee::query()->create(['id' => 'ann:' . $tenant->getMorphClass()]);
+        $member = StubGrantee::query()->create(['id' => 'ann']);
+
+        $plain->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
+        $member->givePermission(Permission::create(['name' => 'posts:delete', 'guard' => 'web']), tenant: $tenant);
+
+        self::assertSame([true, false, false], self::decisions($plain));
+
+        $this->startRequest();
+        $this->actAsTenant($tenant);
+
+        self::assertSame([false, true, false], self::decisions($member));
+
+        $this->startRequest();
+        $this->actAsTenant(null);
+
+        self::assertSame([true, false, false], self::decisions($plain));
     }
 
     /**
