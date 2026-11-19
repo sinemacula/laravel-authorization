@@ -8,8 +8,10 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
@@ -37,6 +39,7 @@ use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -264,6 +267,27 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
+     * Rewriting a policy with the document it was created from changes nothing
+     * and reports nothing, so a guardrail's policy is not refused as edited.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteWithTheCreatedDocumentChangesNothing(): void
+    {
+        $policy = self::service()->create('readers', self::READ);
+
+        DB::table('guardrails')->insert(['policy_id' => $policy->id]);
+        Event::fake([PolicyUpdated::class]);
+
+        $rewritten = self::service()->rewrite(Policy::query()->findOrFail($policy->id), self::READ);
+
+        self::assertFalse($rewritten->wasChanged());
+        Event::assertNotDispatched(PolicyUpdated::class);
+    }
+
+    /**
      * A system policy keeps its protection through the service.
      *
      * @return void
@@ -321,16 +345,97 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
-     * The policies are listed by name.
+     * The policies are listed by name: inside a tenant the platform's, the
+     * tenant's own and its ancestors', never a sibling's or a descendant's;
+     * outside any tenant the platform's alone.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
-    public function testListsThePolicies(): void
+    public function testListsThePoliciesVisibleFromTheCurrentTenant(): void
     {
+        [$parent, $child, $sibling, $grandchild] = \array_map(self::createTenant(...), ['parent', 'child', 'sibling', 'grandchild']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($child), Reference::of($parent))
+            ->put(Reference::of($sibling), Reference::of($parent))
+            ->put(Reference::of($grandchild), Reference::of($child)));
+
         self::service()->create('writers', self::READ);
         self::service()->create('auditors', self::READ);
+        self::service()->create('ancestors', self::READ, tenant: $parent);
+        self::service()->create('own', self::READ, tenant: $child);
+        self::service()->create('siblings', self::READ, tenant: $sibling);
+        self::service()->create('descendants', self::READ, tenant: $grandchild);
 
         self::assertSame(['auditors', 'writers'], self::service()->list()->pluck('name')->all());
+
+        $this->actAsTenant($child);
+
+        self::assertSame(['ancestors', 'auditors', 'own', 'writers'], self::service()->list()->pluck('name')->all());
+    }
+
+    /**
+     * Inline policies are left out of the list, and listed by name for the
+     * grantee they belong to, a model or a reference.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testListsInlinePoliciesByGrantee(): void
+    {
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $team = new Reference('team', 'user-1');
+
+        self::service()->create('managed', self::READ);
+        self::service()->createInline($user, 'writes', self::READ);
+        self::service()->createInline($user, 'reads', self::READ);
+        self::service()->createInline(StubGrantee::create(['id' => 'user-2']), 'seconds', self::READ);
+        self::service()->createInline($team, 'theirs', self::READ);
+
+        self::assertSame(['managed'], self::service()->list()->pluck('name')->all());
+        self::assertSame(['reads', 'writes'], self::service()->listInline($user)->pluck('name')->all());
+        self::assertSame(['theirs'], self::service()->listInline($team)->pluck('name')->all());
+
+        $this->expectException(InvalidGranteeException::class);
+
+        self::service()->listInline(new Reference('team', ''));
+    }
+
+    /**
+     * An actor lists policies only when allowed `authorization:policy.read` in
+     * the scope in place: a grant in a tenant counts there and nowhere else.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActorListsPoliciesOnlyWithTheReadRight(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $other  = self::createTenant('tenant-b');
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $reader = self::administrator([PackagePermissions::POLICY_READ]);
+        $admin  = StubGrantee::create(['id' => 'admin-2']);
+        $local  = ActingContext::for($admin);
+
+        self::grants()->grantPermission($admin, Permission::query()->firstOrCreate(['name' => PackagePermissions::POLICY_READ]), tenant: $other);
+        self::service()->create('readers', self::READ);
+        self::service()->createInline($user, 'mine', self::READ);
+
+        $this->actAsTenant($tenant);
+
+        self::assertSame(['readers'], self::service()->list($reader)->pluck('name')->all());
+        self::assertSame(['mine'], self::service()->listInline($user, $reader)->pluck('name')->all());
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->list($local));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->listInline($user, $local));
+
+        $this->actAsTenant($other);
+
+        self::assertSame(['readers'], self::service()->list($local)->pluck('name')->all());
+        self::assertSame(['mine'], self::service()->listInline($user, $local)->pluck('name')->all());
     }
 
     /**
@@ -428,6 +533,7 @@ final class PolicyServiceTest extends TestCase
             'rewrite'      => static fn () => $service->rewrite($policy, ['version' => 1, 'statements' => []]),
             'delete'       => static fn () => $service->delete($policy),
             'list'         => static fn () => $service->list(),
+            'listInline'   => static fn () => $service->listInline($user),
         ]);
     }
 

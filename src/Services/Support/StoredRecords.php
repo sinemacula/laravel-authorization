@@ -6,6 +6,9 @@ namespace SineMacula\Laravel\Authorization\Services\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The role, permission or policy a delegated change hands out, as stored, so
@@ -69,5 +72,53 @@ final class StoredRecords
         $given->wasRecentlyCreated = $record->wasRecentlyCreated;
 
         return $given;
+    }
+
+    /**
+     * Return the change a grant of the target to the grantee wrote, and refuse
+     * one that wrote no row (null): as the target's when its row is gone, else
+     * as the role's when the grantee is a role whose row is gone, else as not
+     * written.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null  $change
+     * @param  string  $kind
+     * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException
+     */
+    public static function written(?GrantChange $change, string $kind, Model $target, Model|Reference $grantee): GrantChange
+    {
+        if ($change !== null) {
+            return $change;
+        }
+
+        if (self::isGone($target)) {
+            throw new InvalidGrantTargetException($kind, $target);
+        }
+
+        if ($grantee instanceof Role && self::isGone($grantee)) {
+            throw new InvalidGrantTargetException('role', $grantee);
+        }
+
+        $name      = $target->getAttribute('name');
+        $reference = Reference::of($grantee);
+
+        throw new UnwrittenGrantException("grant of {$kind} '" . (\is_scalar($name) ? (string) $name : '') . "' to {$reference->type}:{$reference->id}");
+    }
+
+    /**
+     * Determine whether the model's row is gone, by a locking read on the write
+     * connection outside every global scope, so a delete committed since the
+     * transaction began is seen.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @return bool
+     */
+    private static function isGone(Model $model): bool
+    {
+        return $model->newQueryWithoutScopes()->useWritePdo()->whereKey($model->getKey())->sharedLock()->doesntExist();
     }
 }

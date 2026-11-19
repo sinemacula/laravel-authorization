@@ -8,6 +8,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
@@ -81,7 +83,7 @@ final class GrantTableTest extends TestCase
 
         $change = self::table()->grant($role->id, Carbon::parse('2026-07-01 14:00:00', 'Europe/London'));
 
-        self::assertSame(GrantOutcome::GRANTED, $change->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $change?->outcome);
         self::assertNull($change->previousExpiresAt);
         self::assertSame([[
             'role_id'           => $role->id,
@@ -131,13 +133,13 @@ final class GrantTableTest extends TestCase
 
         $change = self::table(grantedBy: $actor, tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
 
-        self::assertSame(GrantOutcome::REACH_CHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::REACH_CHANGED, $change?->outcome);
         self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertEquals([$role->id => false], self::reaches());
         self::assertSame(['2026-07-02 12:00:00'], self::expiries());
         self::assertSame('2026-07-01 12:30:00', self::rows()[0]['updated_at']);
         self::assertSame([[$role->id, 'stub_grantee', 'admin']], self::grantors());
-        self::assertSame(GrantOutcome::UNCHANGED, self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))?->outcome);
     }
 
     /**
@@ -158,9 +160,9 @@ final class GrantTableTest extends TestCase
         $table->grant($expired->id, Carbon::parse(self::NOW));
         $table->grant($live->id, null);
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $limited->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
-        self::assertSame(GrantOutcome::REARMED, $limited->rearm($expired->id, null)->outcome);
-        self::assertSame(GrantOutcome::UNCHANGED, $limited->rearm($live->id, null)->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $limited->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))?->outcome);
+        self::assertSame(GrantOutcome::REARMED, $limited->rearm($expired->id, null)?->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $limited->rearm($live->id, null)?->outcome);
         self::assertEquals([$role->id => false, $expired->id => false, $live->id => true], self::reaches());
     }
 
@@ -178,8 +180,8 @@ final class GrantTableTest extends TestCase
         self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, null);
         self::table(tenant: self::tenant())->grant($other->id, null);
 
-        self::assertFalse(self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->previousReach);
-        self::assertTrue(self::table(tenant: self::tenant())->grant($other->id, Carbon::parse('2026-07-02 12:00:00'))->previousReach);
+        self::assertFalse(self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))?->previousReach);
+        self::assertTrue(self::table(tenant: self::tenant())->grant($other->id, Carbon::parse('2026-07-02 12:00:00'))?->previousReach);
     }
 
     /**
@@ -222,8 +224,8 @@ final class GrantTableTest extends TestCase
         $every  = self::table();
         $mobile = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', 'user-1', null, null, true, 'mobile');
 
-        self::assertSame(GrantOutcome::GRANTED, $admin->grant($role->id, null)->outcome);
-        self::assertSame(GrantOutcome::GRANTED, $every->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $admin->grant($role->id, null)?->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $every->grant($role->id, null)?->outcome);
         self::assertSame(GrantOutcome::UNCHANGED, $admin->grant($role->id, null)->outcome);
         self::assertSame([], $mobile->held());
         self::assertSame([$role->id], $admin->held());
@@ -255,7 +257,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->grant($role->id, Carbon::parse('2026-07-01 14:00:00', 'Europe/London'));
 
-        self::assertSame(GrantOutcome::UNCHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame(self::NOW, self::rows()[0]['updated_at']);
     }
@@ -274,7 +276,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->grant($role->id, null);
 
-        self::assertSame(GrantOutcome::UNCHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $change?->outcome);
         self::assertNull($change->previousExpiresAt);
         self::assertCount(1, self::rows());
     }
@@ -296,7 +298,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->grant($role->id, Carbon::parse('2026-07-02 13:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame('2026-07-02 13:00:00', self::rows()[0]['expires_at']);
         self::assertSame('2026-07-01 12:30:00', self::rows()[0]['updated_at']);
@@ -316,12 +318,12 @@ final class GrantTableTest extends TestCase
 
         $table->grant($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $table->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $table->grant($role->id, null)?->outcome);
         self::assertNull(self::rows()[0]['expires_at']);
 
         $change = $table->grant($role->id, Carbon::parse('2026-07-01 15:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change?->outcome);
         self::assertNull($change->previousExpiresAt);
         self::assertSame('2026-07-01 15:00:00', self::rows()[0]['expires_at']);
     }
@@ -343,7 +345,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->grant($role->id, null);
 
-        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame(GrantOutcome::REARMED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertNull(self::rows()[0]['expires_at']);
     }
@@ -360,8 +362,54 @@ final class GrantTableTest extends TestCase
 
         self::insertRow($role->id, []);
 
-        self::assertSame(GrantOutcome::UNCHANGED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, self::table()->grant($role->id, null)?->outcome);
         self::assertCount(1, self::rows());
+    }
+
+    /**
+     * A grant of a role that is gone, as a stale model or a concurrent delete
+     * leaves it, writes nothing on every driver, with either reach.
+     *
+     * @return void
+     */
+    public function testAGrantOfARoleThatIsGoneWritesNothing(): void
+    {
+        $role = self::role();
+
+        DB::table('roles')->where('id', $role->id)->delete();
+
+        self::assertNull(self::table()->grant($role->id, null));
+        self::assertNull(self::table(tenant: self::tenant(), includeSubtree: false)->rearmWithReach($role->id, null));
+        self::assertSame([], self::rows());
+    }
+
+    /**
+     * The permission and policy grant tables fold a null tenant and application
+     * into their unique keys, so a grant another writer made in the same scope
+     * is read back rather than written twice.
+     *
+     * @return void
+     */
+    public function testThePermissionAndPolicyKeysFoldNullScopes(): void
+    {
+        $targets = [
+            'authorizable_permissions' => ['permission_id', Permission::query()->create(['name' => 'posts:read'])->id],
+            'authorizable_policies'    => ['policy_id', Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]])->id],
+        ];
+
+        foreach ($targets as $table => [$column, $id]) {
+            foreach ([null, self::tenant()] as $tenant) {
+                $grantee = ['authorizable_type' => 'stub_grantee', 'authorizable_id' => 'user-1'];
+
+                DB::table($table)->insert([$column => $id, ...$grantee, 'tenant_type' => $tenant?->type, 'tenant_id' => $tenant?->id]);
+
+                $change = (new GrantTable(DB::connection(), $table, $column, 'stub_grantee', 'user-1', null, $tenant))->grant($id, null);
+
+                self::assertSame(GrantOutcome::UNCHANGED, $change?->outcome, $table);
+            }
+
+            self::assertSame(2, DB::table($table)->count(), $table);
+        }
     }
 
     /**
@@ -377,7 +425,7 @@ final class GrantTableTest extends TestCase
         self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a', 'expires_at' => '2026-07-01 13:00:00']);
         self::insertRow($role->id, ['application' => 'admin', 'expires_at' => '2026-07-01 13:00:00']);
 
-        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)?->outcome);
         self::assertSame(2, DB::table('authorizable_roles')->where('expires_at', '2026-07-01 13:00:00')->count());
         self::assertSame(1, DB::table('authorizable_roles')->whereNull('expires_at')->whereNull('tenant_type')->whereNull('application')->count());
     }
@@ -397,7 +445,7 @@ final class GrantTableTest extends TestCase
         self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => null]);
 
         self::assertSame([], self::table()->held());
-        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)?->outcome);
         self::assertSame([$role->id], self::table()->held());
 
         self::table()->revoke([$role->id]);
@@ -473,7 +521,7 @@ final class GrantTableTest extends TestCase
 
         $change = self::table()->grant($role->id, Carbon::parse('2026-07-06 12:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change?->outcome);
         self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame(['2026-07-03 12:00:00', '2026-07-04 12:00:00', '2026-07-05 12:00:00', '2026-07-06 12:00:00'], self::expiries());
     }
@@ -496,7 +544,7 @@ final class GrantTableTest extends TestCase
 
         $change = self::table()->rearm($role->id, Carbon::parse('2026-07-06 12:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame(GrantOutcome::REARMED, $change?->outcome);
         self::assertSame('2026-07-01 11:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame(['2026-07-03 12:00:00', '2026-07-04 12:00:00', '2026-07-05 12:00:00', '2026-07-06 12:00:00'], self::expiries());
     }
@@ -516,7 +564,7 @@ final class GrantTableTest extends TestCase
 
         $locks = $this->recordRowLocks();
 
-        self::assertSame(GrantOutcome::UNCHANGED, $table->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->grant($role->id, null)?->outcome);
         self::assertSame([['authorizable_roles', ['stub_grantee', 'user-1', $role->id]]], $locks->getArrayCopy());
     }
 
@@ -531,7 +579,7 @@ final class GrantTableTest extends TestCase
 
         self::table('user-2')->grant($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)?->outcome);
         $expiries = \array_column(self::rows(), 'expires_at', 'authorizable_id');
 
         \ksort($expiries);
@@ -550,7 +598,7 @@ final class GrantTableTest extends TestCase
 
         (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_second_grantee', 'user-1'))->grant($role->id, null);
 
-        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)?->outcome);
         self::assertSame([], self::table()->held([]));
         self::assertSame([$role->id], self::table()->held());
     }
@@ -566,7 +614,7 @@ final class GrantTableTest extends TestCase
 
         $change = self::table()->rearm($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::GRANTED, $change->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', self::rows()[0]['expires_at']);
     }
 
@@ -584,7 +632,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->rearm($role->id, null);
 
-        self::assertSame(GrantOutcome::UNCHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame('2026-07-01 13:00:00', self::rows()[0]['expires_at']);
     }
@@ -601,7 +649,7 @@ final class GrantTableTest extends TestCase
 
         $table->grant($role->id, null);
 
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'))->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'))?->outcome);
         self::assertNull(self::rows()[0]['expires_at']);
     }
 
@@ -621,7 +669,7 @@ final class GrantTableTest extends TestCase
 
         $change = $table->rearm($role->id, Carbon::parse('2026-07-02 14:00:00', 'UTC'));
 
-        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame(GrantOutcome::REARMED, $change?->outcome);
         self::assertSame('2026-07-01 13:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame('2026-07-02 14:00:00', self::rows()[0]['expires_at']);
         self::assertSame('2026-07-01 14:00:00', self::rows()[0]['updated_at']);
@@ -642,7 +690,7 @@ final class GrantTableTest extends TestCase
 
         Carbon::setTestNow('2026-07-01 14:00:00');
 
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'))->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($role->id, Carbon::parse('2026-07-01 13:00:00', 'UTC'))?->outcome);
         self::assertSame(self::NOW, self::rows()[0]['updated_at']);
     }
 
@@ -711,7 +759,7 @@ final class GrantTableTest extends TestCase
         $role   = self::role();
         $scoped = self::table(tenant: self::tenant());
 
-        self::assertSame(GrantOutcome::GRANTED, $scoped->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $scoped->grant($role->id, null)?->outcome);
         $scopes = DB::table('authorizable_roles')->get(['tenant_type', 'tenant_id'])->map(static fn (object $row): array => [$row->tenant_type, $row->tenant_id]);
 
         self::assertSame([['stub_tenant', 'tenant-a']], $scopes->all());
@@ -719,8 +767,8 @@ final class GrantTableTest extends TestCase
         self::assertSame([], self::table()->held());
         self::assertSame([], self::table(tenant: new Reference('stub_tenant', 'tenant-b'))->held());
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $scoped->grant($role->id, Carbon::parse('2026-07-02 12:00:00', 'UTC'))->outcome);
-        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $scoped->grant($role->id, Carbon::parse('2026-07-02 12:00:00', 'UTC'))?->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)?->outcome);
         $format   = static fn (mixed $value): ?string => $value === null ? null : Carbon::parse((string) $value)->format('Y-m-d H:i:s'); // @phpstan-ignore cast.string
         $expiries = [];
 
@@ -971,7 +1019,7 @@ final class GrantTableTest extends TestCase
         $scopes = DB::table('authorizable_roles')->distinct()->get(['tenant_type', 'tenant_id', 'application']);
 
         self::assertSame([['stub_tenant', 'tenant-a', 'admin']], $scopes->map(static fn (object $row): array => \array_values((array) $row))->all());
-        self::assertSame(GrantOutcome::REACH_CHANGED, $node->reaching(true)->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::REACH_CHANGED, $node->reaching(true)->grant($role->id, null)?->outcome);
         self::assertSame(['user-1', 'user-1'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
     }
 
@@ -1020,19 +1068,19 @@ final class GrantTableTest extends TestCase
         $node   = self::table(grantedBy: $actor, tenant: self::tenant(), includeSubtree: false);
         $change = $node->rearmWithReach($held->id, $another);
 
-        self::assertSame(GrantOutcome::REACH_CHANGED, $change->outcome);
+        self::assertSame(GrantOutcome::REACH_CHANGED, $change?->outcome);
         self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertEquals([$held->id => false], self::reaches());
         self::assertSame(['2026-07-02 12:00:00'], self::expiries());
         self::assertSame([self::NOW, '2026-07-01 12:30:00'], [self::rows()[0]['created_at'], self::rows()[0]['updated_at']]);
         self::assertSame([[$held->id, 'stub_grantee', 'admin']], self::grantors());
-        self::assertSame(GrantOutcome::UNCHANGED, $node->rearmWithReach($held->id, $another)->outcome);
-        self::assertSame(GrantOutcome::GRANTED, $node->rearmWithReach($fresh->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $node->rearmWithReach($held->id, $another)?->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $node->rearmWithReach($fresh->id, null)?->outcome);
         self::assertEquals([$held->id => false, $fresh->id => false], self::reaches());
 
         $change = self::table(tenant: self::tenant())->rearmWithReach($held->id, $another, Carbon::parse('2026-07-03 12:00:00'));
 
-        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame(GrantOutcome::REARMED, $change?->outcome);
         self::assertEquals([$held->id => true, $fresh->id => false], self::reaches());
         self::assertSame('2026-07-09 12:00:00', DB::table('authorizable_roles')->where('role_id', $held->id)->value('expires_at'));
     }

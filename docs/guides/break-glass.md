@@ -98,14 +98,19 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
   while impersonated. `revoke()` needs the revoke right, or a trusted call. Each takes the activation or its key and
   returns how many it ended: an activation already ended or expired changes nothing and returns 0, and an unknown key
   throws `ModelNotFoundException`.
+- `GrantService::revokeAll()`, which also runs when a grantee is deleted, ends each of the grantee's activations not
+  ended or expired, whether break-glass is on or off, as revoked, with its grants in one operation, and counts them in
+  what it returns. A delegated call decides each under `authorization:break-glass.revoke` in the activation's scope,
+  before anything is written, so an actor without that right is refused and nothing changes.
 
 **Events.** Each activation dispatches `Grantee\BreakGlassActivated`, carrying the role, the scope, the activation's
 key, the justification code and the expiry, never the note. A surrender or revocation that ended one dispatches
 `Grantee\BreakGlassSurrendered` or `Grantee\BreakGlassRevoked`, with when it ended; ending one already ended or
 expired dispatches nothing. The operation's actor is the granter, the grantee who surrendered or the revoker, and none
 for a trusted call. `authorization:prune` records the expiry of every activation that expired without ending, keeping
-its row, and dispatches `Grantee\BreakGlassExpired` with no actor. Each is dispatched once its write commits, never for
-a refusal or a rollback, whether break-glass is enabled or not.
+its row, and dispatches `Grantee\BreakGlassExpired` with no actor; it ends the unexpired activations of a grantee that
+is gone with its grants, as `revokeAll()` does. Each is dispatched once its write commits, never for a refusal or a
+rollback, whether break-glass is enabled or not.
 
 **Listings, reviews and deletion.** The grant scope query's answers and its lists of grantees reaching or within a
 tenant count a live activation as a grant of its role in its scope, as a check does: none while break-glass is off,

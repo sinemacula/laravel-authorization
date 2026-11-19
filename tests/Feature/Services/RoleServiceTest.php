@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Services;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,7 @@ use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\DeclaresPermissions;
+use Tests\Concerns\RacesAnotherSession;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -78,8 +80,11 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
-        ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
+        ComparesReferences, DeclaresPermissions, RacesAnotherSession, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
         RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection;
+
+    /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
+    private const array RACED = ['testAParentCommittedMeanwhileThatClosesACycleIsRefused'];
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -784,6 +789,31 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A parent another session commits after a parent change first reads, the
+     * two closing a cycle, is seen by the change's ancestor walk, so the change
+     * is refused and no cycle is stored (MySQL and PostgreSQL).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAParentCommittedMeanwhileThatClosesACycleIsRefused(): void
+    {
+        $this->raceOrSkip(['roles'], static function (): void {
+            $first  = self::role('first');
+            $second = self::role('second');
+
+            $refusal = self::refusalOf(static fn (): mixed => self::afterFirstRead(
+                static fn (): Role => self::service()->setParent('second', 'first'),
+                static fn (Connection $other): int => $other->table('roles')->where('id', $first->id)->update(['parent_id' => $second->id]),
+            ));
+
+            self::assertInstanceOf(RoleHierarchyCycleException::class, $refusal);
+            self::assertSame([$second->id, null], [$first->fresh()?->parent_id, $second->fresh()?->parent_id]);
+        });
+    }
+
+    /**
      * A parent another tenant owns is refused, so no chain, and no cycle, runs
      * through two tenants' roles.
      *
@@ -824,6 +854,46 @@ final class RoleServiceTest extends TestCase
             PermissionGranted::class,
             static fn (PermissionGranted $event): bool => self::refersTo($event->role, $role) && self::refersTo($event->permission, $permission),
         );
+    }
+
+    /**
+     * Granting or syncing a permission whose row is gone, or granting one to a
+     * role whose row is gone, each a model read before it was deleted, is
+     * refused as gone on every driver, with nothing written and nothing
+     * dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionOrRoleWhoseRowIsGoneIsRefused(): void
+    {
+        $role       = self::role('editor');
+        $gone       = self::role('gone');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $deleted    = Permission::query()->create(['name' => 'posts:read']);
+
+        DB::table('roles')->where('id', $gone->id)->delete();
+        DB::table('permissions')->where('id', $deleted->id)->delete();
+
+        Event::fake([PermissionGranted::class]);
+
+        $calls = [
+            'permission' => [static fn () => self::service()->grantPermission($role, $deleted), static fn () => self::service()->syncPermissions($role, [$deleted])],
+            'role'       => [static fn () => self::service()->grantPermission($gone, $permission)],
+        ];
+
+        foreach ($calls as $kind => $refused) {
+            foreach ($refused as $call) {
+                $exception = self::refusalOf($call);
+
+                self::assertInstanceOf(InvalidGrantTargetException::class, $exception);
+                self::assertSame($kind, $exception->getKind());
+            }
+        }
+
+        Event::assertNotDispatched(PermissionGranted::class);
+        self::assertSame(0, DB::table('role_permissions')->count());
     }
 
     /**
@@ -1054,6 +1124,52 @@ final class RoleServiceTest extends TestCase
         self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
         self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
+     * A platform role's permission name is looked up among the platform's
+     * permissions, even in a tenant that owns one of that name.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformRolesPermissionNameIsLookedUpOnThePlatform(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::role('editor');
+        $platform = Permission::query()->create(['name' => 'posts:edit']);
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
+    }
+
+    /**
+     * Revoking from a platform role by name finds no permission only a tenant
+     * owns, so the name is unknown.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingATenantsPermissionNameFromAPlatformRoleIsUnknown(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor');
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        $this->expectException(UnknownPermissionException::class);
+
+        self::service()->revokePermission($role, 'posts:edit');
     }
 
     /**
@@ -1553,6 +1669,23 @@ final class RoleServiceTest extends TestCase
             'revokePermission' => static fn () => $service->revokePermission($role, 'posts:read'),
             'syncPermissions'  => static fn () => $service->syncPermissions($role, ['posts:read']),
         ]);
+    }
+
+    /**
+     * Run the races outside the test's transaction, so a call sees what another
+     * session commits; SQLite, which skips them, keeps its transaction.
+     *
+     * @return list<string|null>
+     */
+    #[\Override]
+    protected function connectionsToTransact(): array
+    {
+        $isRaced = \in_array($this->name(), self::RACED, true) && DB::connection()->getDriverName() !== 'sqlite';
+
+        /** @var list<string|null> $connections */
+        $connections = parent::connectionsToTransact();
+
+        return $isRaced ? [] : $connections;
     }
 
     /**

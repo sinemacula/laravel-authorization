@@ -26,16 +26,17 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * only platform-wide rows are visible then. The subject's application is held
  * with it: grants made for one application count only on that application, and
  * with none, only grants for every application count. The tenant's ancestors,
- * read through the bound tenant tree, are held with it once read. A holder put
- * in place to decide just below its tenant (see `TenantScope::within()`) reads
- * a chain standing there.
+ * read through the bound tenant tree, are held with it once read, until a
+ * change to the tree is reported (see `TenantScope::treeChanged()`). A holder
+ * put in place to decide just below its tenant (see `TenantScope::within()`)
+ * reads a chain standing there.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class ResolvedTenant
 {
-    /** @var array{0: \SineMacula\Laravel\Authorization\Contracts\TenantTree, 1: \SineMacula\Laravel\Authorization\Support\TenantChain}|null The chain read for the tenant, with the tree it was read through. */
+    /** @var array{0: \SineMacula\Laravel\Authorization\Contracts\TenantTree, 1: \SineMacula\Laravel\Authorization\Support\TenantChain, 2: object}|null The chain read for the tenant, with the tree it was read through and its version. */
     private ?array $chain = null;
 
     /**
@@ -104,7 +105,8 @@ final class ResolvedTenant
 
     /**
      * Return the tenant and its ancestors through the given tree, read once for
-     * the request or job, and again when another tree is bound.
+     * the request or job, and again when another tree is bound or a change to
+     * the tree is reported.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
      * @return \SineMacula\Laravel\Authorization\Support\TenantChain
@@ -113,8 +115,8 @@ final class ResolvedTenant
      */
     public function chain(TenantTree $tree): TenantChain
     {
-        if ($this->chain === null || $this->chain[0] !== $tree) {
-            $this->chain = [$tree, $this->read($tree, false)];
+        if ($this->chain === null || $this->chain[0] !== $tree || $this->chain[2] !== TenantScope::treeVersion()) {
+            $this->chain = [$tree, $this->read($tree, false), TenantScope::treeVersion()];
         }
 
         return $this->chain[1];
@@ -132,7 +134,7 @@ final class ResolvedTenant
      */
     public function refreshChain(TenantTree $tree): TenantChain
     {
-        $this->chain = [$tree, $this->read($tree, true)];
+        $this->chain = [$tree, $this->read($tree, true), TenantScope::treeVersion()];
 
         return $this->chain[1];
     }

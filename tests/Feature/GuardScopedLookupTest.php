@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -99,6 +100,26 @@ final class GuardScopedLookupTest extends TestCase
 
         self::assertSame([$owned->id, $platform->id], $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', new Reference($tenantA->getMorphClass(), 'tenant-a'))));
         self::assertCount(2, GuardScopedLookup::allForGuard(Role::class, 'editor', 'web'));
+    }
+
+    /**
+     * Given an empty chain, only the platform's row answers, whichever tenant
+     * is current.
+     *
+     * @return void
+     */
+    public function testAnEmptyChainFindsOnlyThePlatformRow(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $platform = Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+
+        Role::query()->create(['name' => 'editor', 'guard' => 'web'] + self::ownedBy($tenant));
+
+        $this->actAsTenant($tenant);
+
+        $found = GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', new TenantChain);
+
+        self::assertSame([$platform->id], \array_map(static fn (Model $model): mixed => $model->getKey(), $found));
     }
 
     /**
