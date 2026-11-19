@@ -32,27 +32,27 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * `UndeclaredPermissionException` before anything is decided or written, so a
  * tenant's own permission is a copy of a declared one.
  *
- * Each method takes the acting context making the call as `$actor`, the reads
- * as well as the writes: null for trusted system work, such as seeders,
- * migrations and console commands. A write with an acting context is delegated
- * administration: it is decided as the actor, through `check()`, on the
- * definition's operation resource, under `authorization:permission.create`,
- * `.rename`, `.update` or `.delete`, inside its transaction before anything is
- * written, and refused with the decision's `AuthorizationException` when it is
- * not allowed. A change is made only from the tenant that owns the permission,
- * a platform permission's from the platform (`administration.owner`):
- * `create()` makes one owned by the tenant it is given, else by the platform,
- * so a tenant's administrator creates its tenant's permissions from that
- * tenant's context. A delegated change weighs, and writes, the permission as
- * stored, discarding changes to the model in hand that were not saved.
- * Creating, describing and deleting a permission widen no one; renaming one
- * re-grants it to every holder under the new name, so each holder must be one
- * the actor administers and the actor must be able to hand out the new name
- * (see `DefinitionConstraints`). `list()` with an acting context is decided as
- * the actor under `authorization:permission.read`, on no resource, in the scope
- * in place, before anything is read (see `ActingContext::authorizeAction()`).
- * Every event a write dispatches carries the operation, with the actor, its
- * mode and the action, once the write commits; the actor is never read from the
+ * Each write, and `list()`, takes the acting context making the call as
+ * `$actor`: null for trusted system work, such as seeders, migrations and
+ * console commands. A write with an acting context is delegated administration:
+ * it is decided as the actor, through `check()`, on the definition's operation
+ * resource, under `authorization:permission.create`, `.rename`, `.update` or
+ * `.delete`, inside its transaction before anything is written, and refused
+ * with the decision's `AuthorizationException` when it is not allowed. A change
+ * is made only from the tenant that owns the permission, a platform
+ * permission's from the platform (`administration.owner`): `create()` makes one
+ * owned by the tenant it is given, else by the platform, so a tenant's
+ * administrator creates its tenant's permissions from that tenant's context. A
+ * delegated change weighs, and writes, the permission as stored, discarding
+ * changes to the model in hand that were not saved. Creating, describing and
+ * deleting a permission widen no one; renaming one re-grants it to every holder
+ * under the new name, so each holder must be one the actor administers and the
+ * actor must be able to hand out the new name (see `DefinitionConstraints`).
+ * `list()` with an acting context is decided as the actor under
+ * `authorization:permission.read`, on no resource, in the scope in place,
+ * before anything is read (see `ActingContext::authorizeAction()`). Every event
+ * a write dispatches carries the operation, with the actor, its mode and the
+ * action, once the write commits; the actor is never read from the
  * authenticated user.
  *
  * Every operation refuses while the package is not healthy (see

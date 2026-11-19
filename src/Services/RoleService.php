@@ -76,12 +76,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `UndeclaredPermissionException` before anything is written. A role keeps an
  * undeclared permission it carries until it is revoked.
  *
- * Each method takes the acting context making the call as `$actor`, the reads
- * as well as the writes: null for trusted system work, such as seeders,
- * migrations and console commands. A write with an acting context is delegated
- * administration: each change it makes is decided as the actor, through
- * `check()`, on the change's operation resource, inside the write's transaction
- * before anything is written, and the first refused throws the decision's
+ * Each write, and `list()`, takes the acting context making the call as
+ * `$actor`: null for trusted system work, such as seeders, migrations and
+ * console commands. A write with an acting context is delegated administration:
+ * each change it makes is decided as the actor, through `check()`, on the
+ * change's operation resource, inside the write's transaction before anything
+ * is written, and the first refused throws the decision's
  * `AuthorizationException`, leaving nothing written. A change to the role
  * itself is decided under `authorization:role.create`, `.rename`, `.update`,
  * `.delete` or `.parent.set`; adding a permission, a new grant or a changed

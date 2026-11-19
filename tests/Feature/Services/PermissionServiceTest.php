@@ -273,8 +273,10 @@ final class PermissionServiceTest extends TestCase
         Permission::query()->create(['name' => 'posts:edit']);
 
         $this->actAsTenant($tenant);
+        self::fakePackageEvents();
 
         self::assertSame($listed, self::service()->list()->pluck('name')->all());
+        self::assertSame([], self::actionsDecided());
         self::assertSame($listed, self::service()->list(actor: $reader)->pluck('name')->all());
 
         foreach ([$local, $nobody] as $actor) {

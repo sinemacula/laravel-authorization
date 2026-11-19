@@ -670,8 +670,10 @@ final class RoleServiceTest extends TestCase
         self::role('editor');
 
         $this->actAsTenant($tenant);
+        self::fakePackageEvents();
 
         self::assertSame(['editor'], self::service()->list()->pluck('name')->all());
+        self::assertSame([], self::actionsDecided());
         self::assertSame(['editor'], self::service()->list(actor: $reader)->pluck('name')->all());
 
         foreach ([$local, $nobody] as $actor) {
