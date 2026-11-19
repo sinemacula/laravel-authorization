@@ -37,8 +37,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * - A change to a role (its permissions or their expiry, its parent, its name,
  *   its owner) or its deletion bumps the role. Entries record every role they
  *   were built from, ancestors included, so the bump reaches every grantee that
- *   holds the role or a role below it. A restore from a soft delete also bumps
- *   the role's holders, whose entries built while it was trashed lack it.
+ *   holds the role or a role below it. A deletion, which a rollback can undo,
+ *   and a restore from a soft delete also bump the role's holders, whose
+ *   entries built while the role was gone lack it.
  * - A change to a policy or its deletion bumps the policy, and the versions
  *   every entry of a resource's policies, every entry of a grantee's boundaries
  *   and every entry of the guardrails share, since those entries read the
@@ -99,9 +100,9 @@ final class Invalidation
             $event instanceof RolePermissionGranted,
             $event instanceof RolePermissionRevoked,
             $event instanceof RolePermissionExpiryChanged,
-            $event instanceof RolePermissionExpired,
-            $event instanceof RoleDeleted => [$store->roleKey($event->role->id)],
-            $event instanceof RoleUpdated => [$store->roleKey($event->role->id), ...self::restoredRoleKeys($store, $event)],
+            $event instanceof RolePermissionExpired => [$store->roleKey($event->role->id)],
+            $event instanceof RoleDeleted,
+            $event instanceof RoleUpdated => [$store->roleKey($event->role->id), ...self::roleHolderKeys($store, $event)],
             $event instanceof PolicyUpdated,
             $event instanceof PolicyDeleted  => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey(), $store->boundariesKey(), $store->guardrailsKey()],
             $event instanceof GuardrailEvent => [$store->guardrailsKey()],
@@ -136,17 +137,22 @@ final class Invalidation
     }
 
     /**
-     * Return the version keys of a role's holders when the update restored it
-     * from a soft delete, or none otherwise: their entries built while it was
-     * trashed did not pin it. The holders of the roles below it did, since the
+     * Return the version keys of a role's holders when the write can give the
+     * role back to them (a deletion, should it roll back, or a restore from a
+     * soft delete), or none otherwise: their entries built while it was gone
+     * did not pin it. The holders of the roles below it did, since the
      * hierarchy reads trashed roles.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\VersionedStore  $store
-     * @param  \SineMacula\Laravel\Authorization\Events\Role\Updated  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Role\Deleted|\SineMacula\Laravel\Authorization\Events\Role\Updated  $event
      * @return list<string>
      */
-    private static function restoredRoleKeys(VersionedStore $store, RoleUpdated $event): array
+    private static function roleHolderKeys(VersionedStore $store, RoleDeleted|RoleUpdated $event): array
     {
+        if ($event instanceof RoleDeleted) {
+            return \array_map($store->granteeKey(...), $event->grantees);
+        }
+
         $role = new (ModelClasses::get('role'));
 
         if (!\method_exists($role, 'getDeletedAtColumn') || ($event->changes['before'][$role->getDeletedAtColumn()] ?? null) === null) {

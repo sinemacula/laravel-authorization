@@ -6,6 +6,7 @@ namespace Tests\Feature\Cache;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Invalidation;
@@ -325,6 +326,30 @@ final class InvalidationTest extends TestCase
 
         self::assertSame([$key, $versions->granteeKey($user)], Invalidation::keys($versions, [$restored]));
         self::assertSame([$key], Invalidation::keys($versions, [$renamed]));
+    }
+
+    /**
+     * A role delete whose transaction rolls back grants again, though a check
+     * inside the transaction stored its holder's denial.
+     *
+     * @return void
+     */
+    public function testARolledBackRoleDeleteGrantsAgain(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        $role->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->assignRole($role);
+
+        DB::beginTransaction();
+        $role->delete();
+        $inside = $this->fresh($user)->hasPermission('posts:edit');
+        DB::rollBack();
+        $this->nextRequest();
+
+        self::assertFalse($inside);
+        self::assertTrue($this->fresh($user)->hasPermission('posts:edit'));
     }
 
     /**
