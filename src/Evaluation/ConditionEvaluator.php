@@ -152,6 +152,21 @@ final class ConditionEvaluator
     }
 
     /**
+     * Determine whether any of the strings is too long for the operator to
+     * test: `fnmatch()` refuses one of `PHP_MAXPATHLEN` bytes or more, so
+     * `like` cannot test it, while `starts_with` and `ends_with` can.
+     *
+     * @param  string  $operator
+     * @param  string  ...$strings
+     * @return bool
+     */
+    public static function isTooLong(string $operator, string ...$strings): bool
+    {
+        return \in_array($operator, self::PATTERN_OPERATORS, true)
+            && \array_filter($strings, static fn (string $string): bool => \strlen($string) >= \PHP_MAXPATHLEN) !== [];
+    }
+
+    /**
      * Log an unknown-operator line at debug level on the package's log channel.
      * Logging never aborts the check, which still fails closed: an unknown
      * operator makes the statement invalid.
@@ -271,8 +286,8 @@ final class ConditionEvaluator
     /**
      * Evaluate the string operators. A pattern operand reaches here already
      * prepared for `fnmatch()` without `FNM_NOESCAPE`. A value or substituted
-     * operand holding a NUL byte is undecidable, since `fnmatch()` cannot test
-     * it and the three operators are kept alike.
+     * operand holding a NUL byte is undecidable for all three, and one too long
+     * for `fnmatch()` is for `like` (see `isTooLong()`).
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -285,12 +300,10 @@ final class ConditionEvaluator
             return MatchResult::invalid(self::invalidOperand($operator));
         }
 
-        if ($operand === '' || !\is_string($actual) || \str_contains($operand . $actual, "\0")) {
-            return MatchResult::undecidable(match (true) {
-                $operand === ''      => "operator '{$operator}' has an empty operand",
-                !\is_string($actual) => "operator '{$operator}' needs a string value",
-                default              => "operator '{$operator}' cannot test a NUL byte",
-            });
+        $untestable = self::untestableString($operator, $operand, $actual);
+
+        if ($untestable !== null || !\is_string($actual)) {
+            return MatchResult::undecidable("operator '{$operator}' {$untestable}");
         }
 
         return MatchResult::fromBool(match ($operator) {
@@ -298,6 +311,26 @@ final class ConditionEvaluator
             'ends_with'   => \str_ends_with($actual, $operand),
             default       => \fnmatch($operand, $actual),
         });
+    }
+
+    /**
+     * Return why a string operator cannot test the value against the operand,
+     * or null when it can.
+     *
+     * @param  string  $operator
+     * @param  string  $operand
+     * @param  mixed  $actual
+     * @return string|null
+     */
+    private static function untestableString(string $operator, string $operand, mixed $actual): ?string
+    {
+        return match (true) {
+            $operand === ''                               => 'has an empty operand',
+            !\is_string($actual)                          => 'needs a string value',
+            \str_contains($operand . $actual, "\0")       => 'cannot test a NUL byte',
+            self::isTooLong($operator, $operand, $actual) => 'cannot test a string of ' . \PHP_MAXPATHLEN . ' bytes or more',
+            default                                       => null,
+        };
     }
 
     /**

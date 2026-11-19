@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
@@ -213,6 +214,27 @@ final class SyncPlanTest extends TestCase
         $this->expectException(DependencyChangedException::class);
 
         $moved->write(Operation::begin(), self::grantee(), null, Carbon::now('UTC'), [$role->id]);
+    }
+
+    /**
+     * Writing a kept row whose role is gone is refused as gone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWritingARowWhoseRoleIsGoneIsRefused(): void
+    {
+        $role    = self::role('gone');
+        $written = new GrantScope(self::tenant());
+        $plan    = new SyncPlan(GrantTarget::ROLE, $written, self::table($written), [$role->id => $role]);
+
+        DB::table('roles')->where('id', $role->id)->delete();
+
+        $refusal = self::refusalOf(static fn (): array => $plan->write(Operation::begin(), self::grantee(), null, Carbon::now('UTC'), []));
+
+        self::assertInstanceOf(InvalidGrantTargetException::class, $refusal);
+        self::assertSame('role', $refusal->getKind());
     }
 
     /**

@@ -8,6 +8,7 @@ use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCodec;
 use SineMacula\Laravel\Authorization\Cache\ResolutionMemo;
@@ -161,6 +162,21 @@ final class ResolutionTiersTest extends TestCase
         self::assertSame(['posts:edit'], $memoOnly->keep('permissions', self::grantee(), new Resolution(['posts:edit']), $this->pins(), true, null));
         self::assertSame(['posts:edit'], $this->memo->get(self::MEMO_KEY));
         self::assertNull($memoOnly->read(self::MEMO_KEY, self::KEY, ResolutionCodec::names(...)));
+    }
+
+    /**
+     * A grantee with no key is kept in the memo alone.
+     *
+     * @return void
+     */
+    public function testAGranteeWithNoKeyIsKeptInTheMemoAlone(): void
+    {
+        $grantee = new \stdClass;
+        $tiers   = $this->tiers();
+
+        self::assertSame(['posts:read'], $tiers->keep('permissions', $grantee, new Resolution(['posts:read']), $this->pins(), true, null));
+        self::assertSame(['posts:read'], $this->memo->get('permissions:' . PrincipalCacheKey::for($grantee)));
+        self::assertNull($this->repository->get($tiers->key('permissions', $grantee)));
     }
 
     /**

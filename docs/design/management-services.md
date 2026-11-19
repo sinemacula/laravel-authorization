@@ -12,8 +12,8 @@ package's connection, rather than through `PermissionService`.
 - `RoleService`: create, rename, describe, re-parent, delete, find and list roles; grant, revoke and sync the
   permissions a role carries.
 - `PermissionService`: create, rename, describe, delete, find and list permissions.
-- `PolicyService`: create, rename, describe, rewrite, delete and list policies, and create a grantee's inline policies
-  (`createInline()`).
+- `PolicyService`: create, rename, describe, rewrite, delete and list policies, and create and list a grantee's inline
+  policies (`createInline()`, `listInline()`).
 - `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, a principal, an identity or a
   role, with an optional expiry.
 - `ResourcePolicyService`: attach a policy to a resource, a record or a whole resource type, and detach it.
@@ -26,13 +26,13 @@ package's connection, rather than through `PermissionService`.
   [Break-glass](break-glass.md)).
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every method
-that writes, and every `list()`, takes the acting context making the call as an optional `$actor`, an
+that writes, and every `list()` and `listInline()`, takes the acting context making the call as an optional `$actor`, an
 `Administration\ActingContext`: null for trusted system work, such as seeders, migrations and console commands, whose
 changes are not decided. A call with one is delegated administration: each change it makes is decided as the actor,
 through `check()`, on the change's operation resource, inside the call's transaction and before anything is written (see
 [Delegated administration](delegated-administration.md)). `GuardrailService` requires it, since it decides whether the
 actor may make the change, and so does `BreakGlassService::surrender()`, which ends the actor's own activation. Every
-event the call dispatches carries the call's operation, and every grant row it writes records the actor in
+change event the call dispatches carries the call's operation, and every grant row it writes records the actor in
 `granted_by_type` and `granted_by_id`. It is never read from the authenticated user or the subject resolver. The events
 themselves are described in [Events](events.md).
 
@@ -52,8 +52,12 @@ themselves are described in [Events](events.md).
    the row back under a lock when it was already there. Granting what the grantee holds (the same target, grantee and
    scope) with the same expiry changes nothing and is reported as `GrantOutcome::UNCHANGED`; a concurrent
    duplicate is the same case, so it never surfaces a unique-constraint violation. A role's permissions are attached
-   through the role permission pivot, so guard parity is enforced, inside a savepoint that a concurrent duplicate rolls
-   back alone.
+   through the role permission pivot, so guard parity is enforced. Each insert runs in a savepoint of its own, so a
+   constraint that refuses it rolls back the insert alone and the transaction stays usable on PostgreSQL. A held row a
+   concurrent call removed before it is read back is written afresh, once. A role, permission or policy deleted before
+   or while it is granted is refused with `InvalidGrantTargetException` on every driver, as is a role deleted while a
+   permission is granted to it, and a grant whose row a concurrent change kept from being written with
+   `UnwrittenGrantException`, which is safe to retry; either way nothing is written and no event is dispatched.
 
 4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on a
    live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry, re-arms a
@@ -119,11 +123,12 @@ themselves are described in [Events](events.md).
 10. **A role's policies are its grants.** A policy attached to a role is a row of `authorizable_policies` with the role
     as the grantee, written, reported and invalidated as any grant is (the events name the role as the grantee).
     Deleting a role detaches its policies through `revokeAll()`, each reported as detached, since the grantee columns
-    carry no foreign key.
+    carry no foreign key. A soft-deleted role keeps them until it is force-deleted.
 
 11. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
-   tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
-   that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
+   tenant's and the platform's alike; a permission named for a role answers among those visible in the role's tenant, or
+   the platform's alone for a platform role. A revocation by name revokes each of them the grantee or role holds, and a
+   sync that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
 12. **A resource's policies are attached like grants.** `ResourcePolicyService::attach()` writes a row of
     `resource_policies`: the policy, the resource's morph type and its key (null for the whole type), and the scope,
@@ -242,9 +247,13 @@ working: each forwards to the matching service method, with the `actor` it is gi
 - **An inline policy created is not attached.** The caller attaches it to its grantee, in the scope it should hold in,
   with `attachPolicy()`.
 - **Without the service provider** the traits refuse to write (`LogicException`) rather than lose the write.
-- **List methods are reads** and run outside a transaction. `list()` takes the actor as the writes do, but decides
-  nothing with it. The other reads, `find()` and `RoleExclusionService`'s `pairs()`, `conflicts()` and
-  `conflictsForAll()`, take none.
+- **List methods are reads** and run outside a transaction. Each takes the actor as the writes do. `PolicyService`'s
+  `list()` and `listInline()` decide `authorization:policy.read` as the actor, on no resource, in the scope in place
+  (`ActingContext::authorizeAction()`), and refuse as `authorize()` does; the role and permission `list()` decide
+  nothing with it. `PolicyService::list()` shows the managed policies visible from the current tenant, the platform's,
+  the tenant's own and its ancestors', as the role and permission lists do, filtering by the tenant chain itself, since
+  the policy model carries no tenant scope; `listInline()` shows one grantee's inline policies. The other reads,
+  `find()` and `RoleExclusionService`'s `pairs()`, `conflicts()` and `conflictsForAll()`, take none.
 - **`authorization:grant` gives no expiry**, so granting a role the grantee holds on a temporary or expired grant makes
   it permanent and is reported as granted; only a role already held with no expiry is reported as held.
 - **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission

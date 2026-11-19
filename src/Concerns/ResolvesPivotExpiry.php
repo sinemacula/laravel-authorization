@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  */
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
-    /** @var \WeakMap<\Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>, string>|null Grants a check read on the write connection, by scope key. */
+    /** @var \WeakMap<\Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>, array{0: string, 1: object}>|null Grants a check read on the write connection, by scope key and tree version. */
     private static ?\WeakMap $authorizationWriterReads = null;
 
     /**
@@ -91,7 +91,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Return the grants of the given relation, read on the write connection
      * first when the relation is not loaded, was loaded other than here, as one
      * the application loaded may have come from a read replica that lags, or
-     * was read here in another tenant or application.
+     * was read here in another tenant or application, or before a change to the
+     * tenant tree was reported.
      *
      * Loading is explicit, never lazy, so a grantee hydrated from a query of
      * several rows resolves under `Model::preventLazyLoading()` as well.
@@ -102,7 +103,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     private function authorizationLoadedGrants(string $relation): EloquentCollection
     {
         $read   = self::$authorizationWriterReads ??= new \WeakMap;
-        $scope  = TenantScope::scopeKey();
+        $scope  = [TenantScope::scopeKey(), TenantScope::treeVersion()];
         $loaded = $this->relationLoaded($relation) ? $this->getRelation($relation) : null;
 
         if ($loaded instanceof EloquentCollection && ($read[$loaded] ?? null) === $scope) {
