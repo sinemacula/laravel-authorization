@@ -344,6 +344,29 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * A re-run grants again with no expiry an imported grant given an expiry
+     * since, or expired, and counts it as a row written.
+     *
+     * @return void
+     */
+    public function testARerunGrantsATemporaryOrExpiredGrantAgainWithNoExpiry(): void
+    {
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        DB::table('auth_authorizable_roles')->update(['expires_at' => Carbon::now()->addDay()]);
+        DB::table('auth_authorizable_permissions')->update(['expires_at' => Carbon::now()->subDay()]);
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $output = Artisan::output();
+
+        self::assertSame([null], DB::table('auth_authorizable_roles')->pluck('expires_at')->all());
+        self::assertSame([null], DB::table('auth_authorizable_permissions')->pluck('expires_at')->all());
+        self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+1\s+\|\s+0\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_permissions\s+\|\s+1\s+\|\s+0\s+\|/', $output);
+    }
+
+    /**
      * A run a grant hook stopped after the catalogue committed is carried on by
      * a re-run, which reuses the roles and permissions and makes the grants.
      *

@@ -326,6 +326,25 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
+     * A dry run whose only differences are system rows, which no sync changes,
+     * exits with success, with `--prune` too.
+     *
+     * @return void
+     */
+    public function testDryRunWithOnlyProtectedRowsSucceeds(): void
+    {
+        Artisan::call(self::COMMAND);
+
+        Permission::create(['name' => 'posts:*', 'is_system' => true]);
+        DB::table('permissions')->where('name', 'posts:create')->update(['description' => 'Platform post creation', 'is_system' => true]);
+
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--dry-run' => true]));
+        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 2,', Artisan::output());
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--dry-run' => true, '--prune' => true]));
+        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 2,', Artisan::output());
+    }
+
+    /**
      * A dry run against a synced catalogue exits with success.
      *
      * @return void
@@ -529,7 +548,8 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * A write that fails part-way rolls back every write before it, on the
-     * package's connection, and is a fatal error.
+     * package's connection, dispatches none of their events, and is a fatal
+     * error.
      *
      * @return void
      */
@@ -539,6 +559,8 @@ final class SyncPermissionsCommandTest extends TestCase
 
         $updated = Permission::create(['name' => 'posts:create', 'description' => 'Write posts']);
         $stale   = Permission::create(['name' => 'posts:purge']);
+
+        Event::fake([PermissionCreated::class, PermissionUpdated::class, PermissionDeleted::class]);
 
         Permission::deleting(static function (): never {
             throw new \RuntimeException('The delete failed.');
@@ -553,6 +575,8 @@ final class SyncPermissionsCommandTest extends TestCase
         );
         self::assertSame('Write posts', $updated->refresh()->description);
         self::assertTrue(Permission::query()->whereKey($stale->getKey())->exists());
+
+        Event::assertNothingDispatched();
     }
 
     /**

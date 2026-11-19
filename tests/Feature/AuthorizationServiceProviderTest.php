@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepositoryImplementation;
 use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Access\Gate as GateContract;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
@@ -18,7 +19,9 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -61,6 +64,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -69,6 +73,7 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
@@ -104,10 +109,12 @@ use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\CatalogueReadingProvider;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\DeferredBindingProvider;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\InjectedRequirementChecker;
@@ -154,6 +161,8 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationServiceProviderTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /** @var list<class-string> Each seam the package gives a default for. */
     private const array DEFAULT_SEAMS = [
         SubjectResolver::class,
@@ -1304,6 +1313,77 @@ final class AuthorizationServiceProviderTest extends TestCase
         (new AuthorizationServiceProvider($app))->register();
 
         self::assertSame(0, $resolved);
+    }
+
+    /**
+     * A configuration cached without the package's defaults, and without whole
+     * blocks, boots, registers the Gate hook and decides with every default,
+     * reporting the denial and not the allow.
+     *
+     * @return void
+     */
+    public function testACachedConfigWithoutWholeBlocksDecidesWithTheDefaults(): void
+    {
+        $app    = $this->application();
+        $config = ['permission_enums' => [PermissionEnum::class]] + Arr::except($this->authorizationConfig(), ['gate', 'cache', 'usage', 'events', 'break_glass']);
+
+        $app->make(ConfigRepository::class)->set('authorization', $config);
+        $app->forgetInstance(GateContract::class);
+        Gate::clearResolvedInstance(GateContract::class);
+
+        // As Laravel marks a configuration it loaded from config:cache.
+        $app->instance('config_loaded_from_cache', true);
+
+        (new AuthorizationServiceProvider($app))->register();
+        (new AuthorizationServiceProvider($app))->boot();
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $user->givePermission(Permission::create(['name' => 'posts:create']));
+
+        Gate::define('posts:delete', static fn (): bool => true);
+        Event::fake([DecisionEvaluated::class]);
+
+        self::assertSame($config, $this->authorizationConfig());
+        self::assertTrue(Gate::forUser($user)->allows('posts:create'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:delete'));
+        self::assertSame(['posts:delete'], \array_map(static fn (DecisionEvaluated $decision): string => $decision->action, self::dispatchedEvents(DecisionEvaluated::class)));
+    }
+
+    /**
+     * The resolution cache keys its entries under the configured prefix, so
+     * services sharing a store read none of each other's, and keeps them for
+     * the configured lifetime.
+     *
+     * @return void
+     */
+    public function testTheResolutionCacheKeepsToTheConfiguredPrefixAndLifetime(): void
+    {
+        $app         = $this->application();
+        $grantee     = new Reference('user', 'user-1');
+        $resolutions = 0;
+        $counts      = [];
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        config(['authorization.cache' => ['store' => 'array', 'ttl' => '60']]);
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        foreach ([['billing', null], ['billing', null], ['shipping', null], ['billing', '12:00:59'], ['billing', '12:01:00']] as [$prefix, $time]) {
+            if ($time !== null) {
+                Carbon::setTestNow("2026-07-01 {$time}");
+            }
+
+            config(['authorization.cache.prefix' => $prefix]);
+            $app->forgetScopedInstances();
+            $app->make(ResolutionCache::class)->rememberPermissions($grantee, $resolve);
+
+            $counts[] = $resolutions;
+        }
+
+        self::assertSame([1, 1, 2, 2, 3], $counts);
     }
 
     /**
