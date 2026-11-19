@@ -25,9 +25,11 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
@@ -261,6 +263,34 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * An entry another worker stores from the rows before a revocation commits
+     * is served until it does, and never once it has.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnEntryStoredBeforeARevocationCommitsIsNeverServed(): void
+    {
+        $revoked = new RoleRevoked(Operation::begin(), self::grantee(), new Reference('role', 'role-1'), 'editor', GrantScope::platform());
+
+        $this->request();
+
+        DB::transaction(function () use ($revoked): void {
+            OperationScope::dispatch($revoked);
+
+            $this->permissions($this->request());
+            $this->permissions($this->request());
+        });
+
+        self::assertSame(1, $this->resolutions);
+
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
      * Without a store a tree change empties the memo only.
      *
      * @return void
@@ -399,6 +429,25 @@ final class ResolutionCacheTest extends TestCase
         $this->permissions($this->request());
 
         self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * A grantee bumped by another worker while its resolution reads leaves the
+     * entry pinned to the version before, so the next request resolves again.
+     *
+     * @return void
+     */
+    public function testAGranteeBumpedWhileResolvingIsNotServedAgain(): void
+    {
+        $this->request()->rememberPermissions(self::grantee(), function (): Resolution {
+            $this->versions()->bump([$this->versions()->granteeKey(self::grantee())]);
+
+            return $this->resolve(['posts:read']);
+        });
+
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
     }
 
     /**
@@ -783,6 +832,21 @@ final class ResolutionCacheTest extends TestCase
         $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
 
         $this->request()->invalidate($keys);
+    }
+
+    /**
+     * A tree change the store fails to record is thrown, so the caller can
+     * retry.
+     *
+     * @return void
+     */
+    public function testATreeChangeTheStoreFailsToRecordIsThrown(): void
+    {
+        $this->store = new Repository(new FailingCacheStore);
+
+        $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
+
+        $this->request()->treeChanged(new Reference('stub_tenant', 'org'));
     }
 
     /**
