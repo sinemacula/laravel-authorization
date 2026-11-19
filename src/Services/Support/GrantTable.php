@@ -28,7 +28,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * A grant inserts its row with insert-or-ignore against the table's unique key,
  * so a grant the grantee already holds, including one a concurrent transaction
  * has just written, never surfaces a unique-constraint violation. When the row
- * was there, it is read back under a row lock and its expiry compared.
+ * was there, it is read back under a row lock and its expiry compared. A grant
+ * of a row that is gone writes nothing on every driver: SQLite and PostgreSQL
+ * refuse the insert on its foreign key, and on MySQL `INSERT IGNORE` turns the
+ * failure into a warning and no row is read back.
  *
  * Every row the writer inserts or rewrites records the actor the call names in
  * `granted_by_type` and `granted_by_id`, both null for console and system work.
@@ -91,14 +94,15 @@ final readonly class GrantTable extends ExpiringGrants
      *
      * Granting what is held with the same expiry and reach changes nothing. A
      * different expiry is written with the reach; the same expiry with a
-     * different reach changes the reach alone.
+     * different reach changes the reach alone. Null when no row could be
+     * written.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
     #[\Override]
-    public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
+    public function grant(string $id, ?\DateTimeInterface $expiresAt): ?GrantChange
     {
         return $this->withReach($id, parent::grant($id, $expiresAt));
     }
@@ -107,14 +111,15 @@ final readonly class GrantTable extends ExpiringGrants
      * Re-arm the given row as `rearm()` does, with the writer's reach, and
      * change the reach of a live row held with the other, keeping its expiry:
      * what a sync does for a row listed with a reach of its own. A changed
-     * reach is reported as `REACH_CHANGED`, with the expiry the row keeps.
+     * reach is reported as `REACH_CHANGED`, with the expiry the row keeps; null
+     * when no row could be written.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Support\Carbon|null  $now
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    public function rearmWithReach(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): GrantChange
+    public function rearmWithReach(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): ?GrantChange
     {
         return $this->withReach($id, $this->rearm($id, $expiresAt, $now));
     }
@@ -313,13 +318,15 @@ final readonly class GrantTable extends ExpiringGrants
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
      * @return bool
+     *
+     * @throws \Throwable
      */
     #[\Override]
     protected function store(string $id, ?Carbon $expiresAt): bool
     {
         $now = Carbon::now();
 
-        return $this->connection->table($this->table)->insertOrIgnore([
+        return self::inserted($this->connection, fn (): bool => $this->connection->table($this->table)->insertOrIgnore([
             $this->column       => $id,
             'authorizable_type' => $this->granteeType,
             'authorizable_id'   => $this->granteeId,
@@ -332,19 +339,24 @@ final readonly class GrantTable extends ExpiringGrants
             'granted_by_id'     => $this->grantedBy?->id,
             'created_at'        => $now,
             'updated_at'        => $now,
-        ]) === 1;
+        ]) === 1);
     }
 
     /**
-     * Read the expiry and the reach of the row in the scope under a row lock.
+     * Read the expiry and the reach of the row in the scope under a row lock,
+     * or null when it is not there.
      *
      * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
     #[\Override]
-    protected function lockedRow(string $id): GrantChange
+    protected function lockedRow(string $id): ?GrantChange
     {
-        $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->sole(['expires_at', 'include_subtree']);
+        $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->first(['expires_at', 'include_subtree']);
+
+        if ($row === null) {
+            return null;
+        }
 
         return new GrantChange(GrantOutcome::UNCHANGED, UtcDateTime::toUtc($row->expires_at), (bool) $row->include_subtree);
     }
@@ -375,12 +387,12 @@ final readonly class GrantTable extends ExpiringGrants
      * it, keeping its expiry, and report the reach changed.
      *
      * @param  string  $id
-     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null  $change
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    private function withReach(string $id, GrantChange $change): GrantChange
+    private function withReach(string $id, ?GrantChange $change): ?GrantChange
     {
-        if ($change->outcome !== GrantOutcome::UNCHANGED || $change->previousReach === $this->includeSubtree) {
+        if ($change?->outcome !== GrantOutcome::UNCHANGED || $change->previousReach === $this->includeSubtree) {
             return $change;
         }
 

@@ -64,4 +64,20 @@ final class PrincipalCacheKeyTest extends TestCase
 
         self::assertSame('p:identity-permissions:user:ann:' . $scope, PrincipalCacheKey::entry('p', 'identity-permissions', $grantee));
     }
+
+    /**
+     * A principal is keyless unless its key is an integer or a non-empty
+     * string.
+     *
+     * @return void
+     */
+    public function testAPrincipalWithoutAUsableKeyIsKeyless(): void
+    {
+        self::assertFalse(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 'ann'])));
+        self::assertFalse(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 0])));
+        self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => ''])));
+        self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee(['id' => 1.5])));
+        self::assertTrue(PrincipalCacheKey::isKeyless(new StubGrantee));
+        self::assertTrue(PrincipalCacheKey::isKeyless(new \stdClass));
+    }
 }

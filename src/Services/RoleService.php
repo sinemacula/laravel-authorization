@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Creates, renames, describes, re-parents, deletes and lists roles, and grants,
@@ -51,7 +52,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * on the role as stored, which carries no unlock. A role named by a string is
  * looked up under the package's default guard; a permission named by a string
  * under the role's own guard, else the default, among the permissions visible
- * in the tenant that owns the role, or in the current tenant for a platform
+ * in the tenant that owns the role, or among the platform's for a platform
  * role. A role model that has not been saved, as the role or as the parent, is
  * refused with `UnsavedRecordException`.
  *
@@ -67,9 +68,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * A role's grant of a permission may carry an expiry, after which it no longer
  * counts. Granting a permission the role carries with the same expiry changes
  * nothing, and a concurrent duplicate never surfaces a unique-constraint
- * violation. The role and role permission events are dispatched once the write
- * commits, on the package's connection, and only for a write that changed
- * something.
+ * violation. A permission, or a role, deleted before or while the permission is
+ * granted is refused with `InvalidGrantTargetException` on every driver, and a
+ * grant whose row a concurrent change kept from being written with
+ * `UnwrittenGrantException`; either rolls the call back. The role and role
+ * permission events are dispatched once the write commits, on the package's
+ * connection, and only for a write that changed something.
  *
  * A permission is granted, or listed by a sync, only when its name covers a
  * declared permission (see `Support\DeclaredPermissions`), else the call throws
@@ -326,7 +330,7 @@ final class RoleService
 
             $model->unsetRelation('permissions');
 
-            $change = (new RolePermissionTable($model))->grant($target->id, $expiresAt);
+            $change = StoredRecords::written((new RolePermissionTable($model))->grant($target->id, $expiresAt), 'permission', $target, $model);
 
             $model->dispatchRelationChange('permission-change', ...self::changeEvents($operation, $model, $target, $change, $expiresAt));
 
@@ -345,7 +349,8 @@ final class RoleService
      * when the role did not carry it.
      *
      * A name revokes every permission of that name the role carries, under the
-     * role's guard or guard-agnostic, whichever tenant or the platform owns it.
+     * role's guard or guard-agnostic, among those visible in the tenant that
+     * owns the role, or the platform's for a platform role.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
@@ -369,7 +374,7 @@ final class RoleService
 
             /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
             $candidates = \is_string($permission)
-                ? GrantTarget::PERMISSION->named($permission, $model->guard, Reference::tenantOf($model))
+                ? GrantTarget::PERMISSION->named($permission, $model->guard, Reference::tenantOf($model) ?? new TenantChain)
                 : [self::permissionFor($model, $permission, $actor)];
             $revoked = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
             $checked = $revoked === [] ? [$candidates[0]] : $revoked;
@@ -443,7 +448,7 @@ final class RoleService
             $model->permissions()->detach($revoked);
 
             foreach ($desired as $target) {
-                $change = $table->rearm($target->id, $expiresAt, $now);
+                $change = StoredRecords::written($table->rearm($target->id, $expiresAt, $now), 'permission', $target, $model);
                 $events = [...$events, ...self::changeEvents($operation, $model, $target, $change, $expiresAt)];
 
                 // A permission decided as carried live is never written back:
@@ -546,7 +551,7 @@ final class RoleService
         foreach ($permissions as $permission) {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $targets */
             $targets = \is_string($permission)
-                ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held, Reference::tenantOf($role))
+                ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held, Reference::tenantOf($role) ?? new TenantChain)
                 : [self::permissionFor($role, $permission, $actor)];
 
             foreach ($targets as $target) {
@@ -578,9 +583,10 @@ final class RoleService
 
     /**
      * Resolve a permission for the role: a name under the role's guard, else
-     * the package default, in the tenant that owns the role; a model once it is
-     * known to be a saved permission, its row as stored for a delegated change
-     * (see `StoredRecords`), so the change is weighed on the stored name.
+     * the package default, in the tenant that owns the role, or on the platform
+     * for a platform role; a model once it is known to be a saved permission,
+     * its row as stored for a delegated change (see `StoredRecords`), so the
+     * change is weighed on the stored name.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  mixed  $permission
@@ -593,7 +599,7 @@ final class RoleService
     private static function permissionFor(Role $role, mixed $permission, ?ActingContext $actor = null): Permission
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Permission $resolved */
-        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard, Reference::tenantOf($role));
+        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard, Reference::tenantOf($role) ?? new TenantChain);
 
         return $actor === null || \is_string($permission) ? $resolved : StoredRecords::of('permission', $resolved);
     }

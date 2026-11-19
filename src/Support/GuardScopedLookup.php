@@ -65,15 +65,16 @@ final class GuardScopedLookup
      * A revocation or synchronisation by name works from these, since a grantee
      * may hold the platform's row while the current tenant owns one of the same
      * name that `findForGuard()` would pick. Given a tenant, the rows visible
-     * in that tenant are read in place of the current tenant's.
+     * in that tenant are read in place of the current tenant's; given a chain,
+     * those visible in it, so an empty chain reads the platform's alone.
      *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  string  $name
      * @param  string  $guard
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|\SineMacula\Laravel\Authorization\Support\TenantChain|null  $tenant
      * @return list<\Illuminate\Database\Eloquent\Model>
      */
-    public static function allForGuard(string $class, string $name, string $guard, ?Reference $tenant = null): array
+    public static function allForGuard(string $class, string $name, string $guard, Reference|TenantChain|null $tenant = null): array
     {
         /** @var list<\Illuminate\Database\Eloquent\Model> */
         return self::queryForGuard($class, $name, $guard, $tenant)->get()->all();
@@ -86,16 +87,16 @@ final class GuardScopedLookup
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  string  $name
      * @param  string  $guard
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|\SineMacula\Laravel\Authorization\Support\TenantChain|null  $tenant
      * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
      */
-    private static function queryForGuard(string $class, string $name, string $guard, ?Reference $tenant = null): Builder
+    private static function queryForGuard(string $class, string $name, string $guard, Reference|TenantChain|null $tenant = null): Builder
     {
         $instance = new $class;
         $grammar  = $instance->getConnection()->getQueryGrammar();
         $column   = static fn (string $column): string => $instance->qualifyColumn($column);
 
-        $chain = $tenant === null ? TenantScope::currentChain() : TenantChain::of($tenant, TenantChain::tree());
+        $chain = $tenant instanceof Reference ? TenantChain::of($tenant, TenantChain::tree()) : $tenant ?? TenantScope::currentChain();
         $query = $instance->newQuery();
 
         if ($tenant !== null) {

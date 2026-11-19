@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Thrown when a grant, revocation or sync is handed something that is not a
  * saved model of the kind it grants: a policy grant given another model, or a
- * name, or a role sync given a permission.
+ * name, a role sync given a permission, or a model whose row is gone.
  *
  * The target comes from the calling code, so this is a programming error rather
  * than a client-facing outcome.

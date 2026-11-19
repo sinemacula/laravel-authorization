@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Services\Support;
 
+use Illuminate\Database\Connection;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -20,6 +22,13 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
  * write reports what it changed and the expiry, and any reach, the row carried
  * before.
  *
+ * A held row is only ever reported once it is read back: one a concurrent call
+ * removed between the ignored store and the read is stored afresh, once, and
+ * when that leaves no row either, as a granted row deleted does, the write
+ * reports nothing and writes nothing. A store an integrity constraint refuses,
+ * a granted row deleted or a concurrent duplicate, rolls back to a savepoint of
+ * its own, so the caller's transaction stays usable on PostgreSQL.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -30,23 +39,18 @@ abstract readonly class ExpiringGrants
      *
      * Granting what is held with the same expiry changes nothing. Any other
      * expiry is written: a grant that had expired is re-armed, and a live
-     * grant's expiry is changed.
+     * grant's expiry is changed. Null when no row could be written.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
+    public function grant(string $id, ?\DateTimeInterface $expiresAt): ?GrantChange
     {
         $expiresAt = UtcDateTime::toUtc($expiresAt);
+        $held      = $this->written($id, $expiresAt);
 
-        if ($this->store($id, $expiresAt)) {
-            return new GrantChange(GrantOutcome::GRANTED);
-        }
-
-        $held = $this->lockedRow($id);
-
-        if (self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
+        if ($held?->outcome !== GrantOutcome::UNCHANGED || self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
             return $held;
         }
 
@@ -61,25 +65,21 @@ abstract readonly class ExpiringGrants
      * Whether the grant is live is judged at the instant given, else now, so a
      * sync that judged which of its rows are live at one instant, and decided
      * only those that were not, re-arms exactly those: a row live then is left
-     * as it is even when it expires before it is written.
+     * as it is even when it expires before it is written. Null when no row
+     * could be written.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Support\Carbon|null  $now
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    public function rearm(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): GrantChange
+    public function rearm(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): ?GrantChange
     {
         $expiresAt = UtcDateTime::toUtc($expiresAt);
         $now ??= Carbon::now('UTC');
+        $held = $this->written($id, $expiresAt);
 
-        if ($this->store($id, $expiresAt)) {
-            return new GrantChange(GrantOutcome::GRANTED);
-        }
-
-        $held = $this->lockedRow($id);
-
-        if (!self::hasExpired($held->previousExpiresAt, $now) || self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
+        if ($held?->outcome !== GrantOutcome::UNCHANGED || !self::hasExpired($held->previousExpiresAt, $now) || self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
             return $held;
         }
 
@@ -98,12 +98,13 @@ abstract readonly class ExpiringGrants
 
     /**
      * Read the held row under a row lock, as a write that left it as it was:
-     * its expiry and, for grants that carry one, its reach.
+     * its expiry and, for grants that carry one, its reach; null when it is not
+     * there.
      *
      * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    abstract protected function lockedRow(string $id): GrantChange;
+    abstract protected function lockedRow(string $id): ?GrantChange;
 
     /**
      * Write the new expiry to the held row.
@@ -113,6 +114,58 @@ abstract readonly class ExpiringGrants
      * @return void
      */
     abstract protected function writeExpiry(string $id, ?Carbon $expiresAt): void;
+
+    /**
+     * Run the insert in a savepoint on the connection, and report whether it
+     * stored the row: not when an integrity constraint refused it, which rolls
+     * back the savepoint alone. Any other failure is thrown.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \Closure(): bool  $insert
+     * @return bool
+     *
+     * @throws \Illuminate\Database\QueryException
+     * @throws \Throwable
+     */
+    protected static function inserted(Connection $connection, \Closure $insert): bool
+    {
+        try {
+            return $connection->transaction($insert);
+        } catch (QueryException $exception) {
+            // SQLSTATE class 23: the row's only constraints are its keys.
+            if (!\str_starts_with((string) $exception->getCode(), '23')) {
+                throw $exception;
+            }
+
+            return false;
+        }
+    }
+
+    /**
+     * Store the row, else read the held row under a row lock, storing afresh,
+     * once, a held row a concurrent call removed in between; null when neither
+     * leaves a row.
+     *
+     * @param  string  $id
+     * @param  \Illuminate\Support\Carbon|null  $expiresAt
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
+     */
+    private function written(string $id, ?Carbon $expiresAt): ?GrantChange
+    {
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            if ($this->store($id, $expiresAt)) {
+                return new GrantChange(GrantOutcome::GRANTED);
+            }
+
+            $held = $this->lockedRow($id);
+
+            if ($held !== null) {
+                return $held;
+            }
+        }
+
+        return null;
+    }
 
     /**
      * Write the new expiry and report the change: a re-armed grant when the

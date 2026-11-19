@@ -36,6 +36,7 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * The kinds of row a grantee can be granted, each with its configured model,
@@ -128,14 +129,14 @@ enum GrantTarget: string
      *
      * @param  mixed  $target
      * @param  string|null  $guard
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|\SineMacula\Laravel\Authorization\Support\TenantChain|null  $tenant
      * @return \Illuminate\Database\Eloquent\Model
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function resolve(mixed $target, ?string $guard, ?Reference $tenant = null): Model
+    public function resolve(mixed $target, ?string $guard, Reference|TenantChain|null $tenant = null): Model
     {
         return \is_string($target) ? $this->named($target, $guard, $tenant)[0] : $this->assertTarget($target);
     }
@@ -147,14 +148,14 @@ enum GrantTarget: string
      *
      * @param  string  $name
      * @param  string|null  $guard
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|\SineMacula\Laravel\Authorization\Support\TenantChain|null  $tenant
      * @return non-empty-list<\Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function named(string $name, ?string $guard, ?Reference $tenant = null): array
+    public function named(string $name, ?string $guard, Reference|TenantChain|null $tenant = null): array
     {
         if ($this === self::POLICY) {
             throw new InvalidGrantTargetException($this->value, $name);
@@ -182,14 +183,14 @@ enum GrantTarget: string
      * @param  string  $name
      * @param  string|null  $guard
      * @param  list<string>  $held
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|\SineMacula\Laravel\Authorization\Support\TenantChain|null  $tenant
      * @return non-empty-list<\Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function heldOrFirst(string $name, ?string $guard, array $held, ?Reference $tenant = null): array
+    public function heldOrFirst(string $name, ?string $guard, array $held, Reference|TenantChain|null $tenant = null): array
     {
         $named = $this->named($name, $guard, $tenant);
         $kept  = \array_values(\array_filter($named, static function (Model $model) use ($held): bool {

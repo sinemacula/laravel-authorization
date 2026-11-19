@@ -41,7 +41,7 @@ final class RolePermissionTableTest extends TestCase
         $permission = Permission::query()->create(['name' => 'posts:edit']);
 
         self::assertCount(0, $role->permissions);
-        self::assertSame(GrantOutcome::GRANTED, (new RolePermissionTable($role))->grant($permission->id, Carbon::parse('2099-01-01 12:00:00'))->outcome);
+        self::assertSame(GrantOutcome::GRANTED, (new RolePermissionTable($role))->grant($permission->id, Carbon::parse('2099-01-01 12:00:00'))?->outcome);
         self::assertFalse($role->relationLoaded('permissions'));
         self::assertSame([[$role->id, $permission->id, '2099-01-01 12:00:00']], self::rows());
     }
@@ -84,8 +84,29 @@ final class RolePermissionTableTest extends TestCase
             DB::table('role_permissions')->insert(['role_id' => $role->id, 'permission_id' => $permission->id]);
         });
 
-        self::assertSame(GrantOutcome::UNCHANGED, (new RolePermissionTable($role))->grant($permission->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, (new RolePermissionTable($role))->grant($permission->id, null)?->outcome);
         self::assertSame([[$role->id, $permission->id, null]], self::rows());
+    }
+
+    /**
+     * A grant of a permission that is gone, or to a role that is gone, attaches
+     * nothing, on every driver.
+     *
+     * @return void
+     */
+    public function testAGrantWhosePermissionOrRoleIsGoneAttachesNothing(): void
+    {
+        $role       = Role::query()->create(['name' => 'editor']);
+        $gone       = Role::query()->create(['name' => 'gone']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $deleted    = Permission::query()->create(['name' => 'posts:read']);
+
+        DB::table('roles')->where('id', $gone->id)->delete();
+        DB::table('permissions')->where('id', $deleted->id)->delete();
+
+        self::assertNull((new RolePermissionTable($role))->grant($deleted->id, null));
+        self::assertNull((new RolePermissionTable($gone))->grant($permission->id, null));
+        self::assertSame([], self::rows());
     }
 
     /**
@@ -108,7 +129,7 @@ final class RolePermissionTableTest extends TestCase
 
         $locks = $this->recordRowLocks();
 
-        self::assertSame(GrantOutcome::REARMED, $table->grant($permission->id, Carbon::parse('2099-01-01 00:00:00'))->outcome);
+        self::assertSame(GrantOutcome::REARMED, $table->grant($permission->id, Carbon::parse('2099-01-01 00:00:00'))?->outcome);
         self::assertSame([['role_permissions', [$role->id, $permission->id]]], $locks->getArrayCopy());
         self::assertEqualsCanonicalizing([
             [$role->id, $permission->id, '2099-01-01 00:00:00'],

@@ -515,6 +515,66 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * A tenant `within()` holds, and the enclosing one a nested call restores,
+     * read their ancestors again once a move is reported.
+     *
+     * @return void
+     */
+    public function testWithinReadsItsAncestorsAgainOnceAMoveIsReported(): void
+    {
+        [$account, $org, $other] = \array_map(static fn (string $id): Reference => new Reference('stub_tenant', $id), ['account', 'org', 'other']);
+        $tree                    = (new StubTenantTree)->put($account, $org);
+        $ancestor                = static fn (): ?Reference => TenantScope::currentChain()->tenants[1] ?? null;
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        $seen = TenantScope::within($account, null, static function () use ($account, $other, $tree, $ancestor): array {
+            $before = $ancestor();
+
+            TenantScope::within($other, null, static function () use ($account, $other, $tree): void {
+                $tree->put($account, $other);
+                Authorization::treeChanged($account);
+            });
+
+            return [$before, $ancestor()];
+        });
+
+        self::assertEquals([$org, $other], $seen);
+    }
+
+    /**
+     * A move reported in a savepoint that commits inside a transaction that
+     * rolls back is read again once it rolls back.
+     *
+     * @return void
+     */
+    public function testAMoveRolledBackIsReadAgain(): void
+    {
+        [$account, $org, $other] = \array_map(static fn (string $id): Reference => new Reference('stub_tenant', $id), ['account', 'org', 'other']);
+        $tree                    = (new StubTenantTree)->put($account, $org);
+        $ancestor                = static fn (): ?Reference => TenantScope::currentChain()->tenants[1] ?? null;
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        $seen = TenantScope::within($account, null, static function () use ($account, $org, $other, $tree, $ancestor): array {
+            DB::beginTransaction();
+            DB::transaction(static function () use ($account, $other, $tree): void {
+                $tree->put($account, $other);
+                Authorization::treeChanged($account);
+            });
+
+            $moved = $ancestor();
+
+            $tree->put($account, $org);
+            DB::rollBack();
+
+            return [$moved, $ancestor()];
+        });
+
+        self::assertEquals([$other, $org], $seen);
+    }
+
+    /**
      * What is resolved within another application is not served to the request
      * afterwards, and without a resolution cache bound, within runs all the
      * same.
@@ -811,9 +871,9 @@ final class TenantScopeTest extends TestCase
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubGrantee::create(['id' => 'u1']), $tenant, 'admin'));
         $this->app?->forgetInstance(ResolvedTenant::class);
 
-        self::assertSame("{$type}:t1:app:admin", TenantScope::scopeKey());
+        self::assertSame("{$type}:t1:app=admin", TenantScope::scopeKey());
         self::assertSame("{$type}:t1:below:every", TenantScope::within($tenant, null, static fn (): string => TenantScope::scopeKey(), true));
-        self::assertSame('platform:app:mobile', TenantScope::within(null, 'mobile', static fn (): string => TenantScope::scopeKey()));
+        self::assertSame('platform:app=mobile', TenantScope::within(null, 'mobile', static fn (): string => TenantScope::scopeKey()));
 
         $resolver = new class implements SubjectResolver {
             /** @var string|null The scope key read while the subject was resolved. */
@@ -850,6 +910,34 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame('platform:every', TenantScope::scopeKey());
         self::assertSame('platform:every', $resolver->key);
+    }
+
+    /**
+     * Two scopes never share a key, whatever their tenant's type and key, or
+     * their application, hold.
+     *
+     * @return void
+     */
+    public function testNoTwoScopesShareAKey(): void
+    {
+        $key = static fn (?Reference $tenant, ?string $app = null, bool $isBelow = false): string => TenantScope::within($tenant, $app, TenantScope::scopeKey(...), $isBelow);
+
+        $keys = [
+            $key(new Reference('team', 'x:below')),
+            $key(new Reference('team', 'x'), null, true),
+            $key(new Reference('team', 'x:app')),
+            $key(new Reference('team', 'x'), 'every'),
+            $key(new Reference('platform', 'app')),
+            $key(null, 'every'),
+            $key(new Reference('a:b', 'c')),
+            $key(new Reference('a', 'b:c')),
+            $key(new Reference('team', 'x%3Abelow')),
+            $key(new Reference('platform', 'app=a')),
+            $key(null, 'a:every'),
+            $key(null, 'a%3Aevery'),
+        ];
+
+        self::assertSame($keys, \array_values(\array_unique($keys)));
     }
 
     /**

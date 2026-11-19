@@ -938,6 +938,34 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
+     * A `like` test of a value too long for `fnmatch()` is undecidable, as
+     * `check()` finds it: a deny applies to every row and an allow keeps none.
+     *
+     * @return void
+     */
+    public function testALikeOfAValueTooLongToTestIsUndecidable(): void
+    {
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $context = ['agent' => \str_repeat('a bot ', \PHP_MAXPATHLEN)];
+
+        foreach ([1, 2] as $id) {
+            TenantScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        $user->attachPolicy(self::storedPolicy('agents', [
+            ['effect' => 'allow', 'actions' => ['posts:view', 'posts:edit']],
+            ['effect' => 'deny', 'actions' => ['posts:view'], 'conditions' => ['like' => ['input.agent' => '*bot*']]],
+            ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => ['like' => ['input.agent' => '*']]],
+        ]));
+
+        foreach (['posts:view' => [], 'posts:edit' => [1, 2], 'posts:delete' => []] as $action => $expected) {
+            self::assertSame($expected, self::checked($manager, $action, [1, 2], $context), $action);
+            self::assertSame($expected, self::kept($manager, $action, context: $context), $action);
+        }
+    }
+
+    /**
      * Under a morph map, a pattern, a record attachment and a row's tenant are
      * compared by the alias, as `check()` compares them: the class name names
      * no record and no tenant.
@@ -1017,30 +1045,32 @@ final class QueryAuthorizerTest extends TestCase
 
     /**
      * Return the keys of the tenant-scoped posts given whose record `check()`
-     * allows the action on, in order.
+     * allows the action on with the caller's values, in order.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
      * @param  string  $action
      * @param  list<int>  $ids
+     * @param  array<string, mixed>  $context
      * @return list<int>
      */
-    private static function checked(AuthorizationManager $manager, string $action, array $ids): array
+    private static function checked(AuthorizationManager $manager, string $action, array $ids, array $context = []): array
     {
-        return \array_values(\array_filter($ids, static fn (int $id): bool => $manager->can($action, TenantScopedPost::query()->find($id))));
+        return \array_values(\array_filter($ids, static fn (int $id): bool => $manager->can($action, TenantScopedPost::query()->find($id), $context)));
     }
 
     /**
      * Return the column of the tenant-scoped posts the manager's scope keeps
-     * for the action, in order of their keys.
+     * for the action with the caller's values, in order of their keys.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
      * @param  string  $action
      * @param  string  $column
+     * @param  array<string, mixed>  $context
      * @return array<int, mixed>
      */
-    private static function kept(AuthorizationManager $manager, string $action, string $column = 'id'): array
+    private static function kept(AuthorizationManager $manager, string $action, string $column = 'id', array $context = []): array
     {
-        return TenantScopedPost::query()->whereAuthorized($action, [], $manager)->orderBy('id')->pluck($column)->all(); // @phpstan-ignore method.notFound
+        return TenantScopedPost::query()->whereAuthorized($action, $context, $manager)->orderBy('id')->pluck($column)->all(); // @phpstan-ignore method.notFound
     }
 
     /**
