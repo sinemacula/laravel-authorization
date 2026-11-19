@@ -8,6 +8,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
@@ -362,6 +364,35 @@ final class GrantTableTest extends TestCase
 
         self::assertSame(GrantOutcome::UNCHANGED, self::table()->grant($role->id, null)->outcome);
         self::assertCount(1, self::rows());
+    }
+
+    /**
+     * The permission and policy grant tables fold a null tenant and application
+     * into their unique keys, so a grant another writer made in the same scope
+     * is read back rather than written twice.
+     *
+     * @return void
+     */
+    public function testThePermissionAndPolicyKeysFoldNullScopes(): void
+    {
+        $targets = [
+            'authorizable_permissions' => ['permission_id', Permission::query()->create(['name' => 'posts:read'])->id],
+            'authorizable_policies'    => ['policy_id', Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]])->id],
+        ];
+
+        foreach ($targets as $table => [$column, $id]) {
+            foreach ([null, self::tenant()] as $tenant) {
+                $grantee = ['authorizable_type' => 'stub_grantee', 'authorizable_id' => 'user-1'];
+
+                DB::table($table)->insert([$column => $id, ...$grantee, 'tenant_type' => $tenant?->type, 'tenant_id' => $tenant?->id]);
+
+                $change = (new GrantTable(DB::connection(), $table, $column, 'stub_grantee', 'user-1', null, $tenant))->grant($id, null);
+
+                self::assertSame(GrantOutcome::UNCHANGED, $change->outcome, $table);
+            }
+
+            self::assertSame(2, DB::table($table)->count(), $table);
+        }
     }
 
     /**

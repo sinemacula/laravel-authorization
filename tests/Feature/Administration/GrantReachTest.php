@@ -5,7 +5,10 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Illuminate\Contracts\Database\Query\Builder;
+use Illuminate\Database\Events\TransactionRolledBack;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\GrantReach;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -169,6 +172,36 @@ final class GrantReachTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
 
         GrantReach::of(new GrantScope(new Reference('tenant', 'parent')));
+    }
+
+    /**
+     * A subtree query that fails as it runs throws, rolling back only the
+     * savepoint it ran in, so the transaction around it stays usable.
+     *
+     * @return void
+     */
+    public function testAFailingSubtreeQueryRollsBackOnlyItsSavepoint(): void
+    {
+        $this->app?->instance(TenantTree::class, self::tree(static fn (): Builder => DB::table('missing_closure')->select(['tenant_type', 'tenant_id'])));
+
+        $level      = DB::transactionLevel();
+        $rolledBack = [];
+
+        Event::listen(TransactionRolledBack::class, static function (TransactionRolledBack $event) use (&$rolledBack): void {
+            $rolledBack[] = $event->connection->transactionLevel();
+        });
+
+        $thrown = null;
+
+        try {
+            GrantReach::of(new GrantScope(new Reference('tenant', 'parent')));
+        } catch (\Throwable $exception) {
+            $thrown = $exception;
+        }
+
+        self::assertInstanceOf(QueryException::class, $thrown);
+        self::assertSame([$level], $rolledBack);
+        self::assertSame(0, DB::table('guardrails')->count());
     }
 
     /**
