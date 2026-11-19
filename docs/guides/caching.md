@@ -99,7 +99,8 @@ A write through the package's models and services bumps the versions its events 
 |----------------------------------------------------------------------------------|---------------------------------------------------------------|
 | A grant to a grantee, its revocation or expiry, a boundary set or removed        | The grantee's                                                 |
 | A policy attached to, detached from or expiring on a role                        | The role's `grantee:` version and `role-policies`             |
-| A role's permissions or their expiry, its parent, name or owner, or its deletion | The role's                                                    |
+| A role's permissions or their expiry, its parent, name or owner                  | The role's                                                    |
+| A role deleted, or a soft-deleted role restored                                  | The role's and each grantee holding it                        |
 | A policy changed or deleted                                                      | The policy's, `resource-policies`, `boundaries`, `guardrails` |
 | A guardrail set or removed                                                       | `guardrails`                                                  |
 | A policy attached to or detached from a resource                                 | `resource-policies:{type}`                                    |
