@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -44,9 +45,11 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * that names no model class is skipped and reported, so a missing morph map
  * entry never removes grants or boundaries.
  *
- * A break-glass activation that expired without ending is never removed: its
- * expiry is recorded on its row and reported with `BreakGlassExpired` (see
- * `ExpiredActivations`).
+ * A break-glass activation is never removed: one that expired without ending
+ * has its expiry recorded on its row and reported with `BreakGlassExpired` (see
+ * `ExpiredActivations`), and an unexpired one of a grantee that is gone, which
+ * finds the grantee too, is ended by `revokeAll()`, reported as revoked and
+ * counted among its grants.
  *
  * The inline policies of a grantee that no longer exists are deleted too, each
  * through the model so it is reported as deleted and its attachments go with
@@ -66,9 +69,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  *
  * Pretending counts exactly what a real run would remove, in the same order: an
  * expired grant once, among the expired, the boundaries of a grantee that is
- * gone, and its grants that are still live, with the attachments of its own
- * inline policies among them, since a real run revokes those before it deletes
- * the policies, then the attachments of each record that is gone.
+ * gone, and its grants and activations that are still live, with the
+ * attachments of its own inline policies among them, since a real run revokes
+ * those before it deletes the policies, then the attachments of each record
+ * that is gone.
  *
  * Pruning refuses while the package is not healthy (see `PackageState`), before
  * any row is read.
@@ -379,9 +383,9 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the grantees, across every grant table and the boundaries table,
-     * that no longer exist, keyed so each is listed once, and the grantee types
-     * that name no model class.
+     * Return the grantees, across every grant table, the boundaries table and
+     * the activations not ended or expired, that no longer exist, keyed so each
+     * is listed once, and the grantee types that name no model class.
      *
      * @param  int  $chunk
      * @return array{0: array<string, \SineMacula\Laravel\Authorization\Support\Reference>, 1: array<string, string>}
@@ -391,8 +395,14 @@ final readonly class GrantPruner
         $orphans    = [];
         $unresolved = [];
 
-        foreach ([...\array_map(static fn (GrantTarget $kind): string => $kind->table(), GrantTarget::cases()), self::table('authorizable_boundaries')] as $table) {
-            [$missing, $types] = self::missingOwners($table, 'authorizable', $chunk);
+        $tables = [
+            ...\array_map(static fn (GrantTarget $kind): Builder => AuthorizationConnection::connection()->table($kind->table()), GrantTarget::cases()),
+            self::table('authorizable_boundaries'),
+            BreakGlassActivations::unexpired(self::table('break_glass'), TableNames::get('break_glass')),
+        ];
+
+        foreach ($tables as $rows) {
+            [$missing, $types] = self::missingOwners($rows, 'authorizable', $chunk);
 
             $orphans    += $missing;
             $unresolved += $types;
@@ -402,24 +412,24 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the records a table's morph names that no longer exist, keyed so
+     * Return the records the rows' morph names that no longer exist, keyed so
      * each is listed once, and the morph types that name no model class: the
      * grantees of a grant table, the grantees inline policies belong to, or the
      * records resource policies are attached to. A row whose key is null, such
      * as an attachment to a whole type, names no record and is passed over.
      *
-     * @param  string  $table
+     * @param  \Illuminate\Database\Query\Builder  $rows
      * @param  string  $morph
      * @param  int  $chunk
      * @return array{0: array<string, \SineMacula\Laravel\Authorization\Support\Reference>, 1: array<string, string>}
      */
-    private static function missingOwners(string $table, string $morph, int $chunk): array
+    private static function missingOwners(Builder $rows, string $morph, int $chunk): array
     {
         $missing    = [];
         $unresolved = [];
 
         /** @var list<string> $types */
-        $types = AuthorizationConnection::connection()->table($table)
+        $types = (clone $rows)
             ->whereNotNull($morph . '_type')
             ->whereNotNull($morph . '_id')
             ->distinct()
@@ -436,7 +446,7 @@ final readonly class GrantPruner
                 continue;
             }
 
-            foreach (self::missing($table, $morph, $type, $class, $chunk) as $id) {
+            foreach (self::missing($rows, $morph, $type, $class, $chunk) as $id) {
                 $missing["{$type}:{$id}"] = new Reference($type, $id);
             }
         }
@@ -445,22 +455,22 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the keys of the records of one type a table's morph names that the
+     * Return the keys of the records of one type the rows' morph names that the
      * type's model no longer has, soft-deleted rows counting as had.
      *
-     * @param  string  $table
+     * @param  \Illuminate\Database\Query\Builder  $rows
      * @param  string  $morph
      * @param  string  $type
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  int  $chunk
      * @return list<string>
      */
-    private static function missing(string $table, string $morph, string $type, string $class, int $chunk): array
+    private static function missing(Builder $rows, string $morph, string $type, string $class, int $chunk): array
     {
         $missing = [];
         $column  = $morph . '_id';
 
-        AuthorizationConnection::connection()->table($table)
+        (clone $rows)
             ->where($morph . '_type', $type)
             ->whereNotNull($column)
             ->select($column)
@@ -483,14 +493,14 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the package table, as `authorization.tables` names it.
+     * Return a query of the package table, as `authorization.tables` names it.
      *
      * @param  string  $name
-     * @return string
+     * @return \Illuminate\Database\Query\Builder
      */
-    private static function table(string $name): string
+    private static function table(string $name): Builder
     {
-        return TableNames::get($name);
+        return AuthorizationConnection::connection()->table(TableNames::get($name));
     }
 
     /**
@@ -501,7 +511,7 @@ final readonly class GrantPruner
      */
     private static function countAttachments(Reference $record): int
     {
-        return AuthorizationConnection::connection()->table(self::table('resource_policies'))
+        return self::table('resource_policies')
             ->where('resource_type', $record->type)
             ->where('resource_id', $record->id)
             ->count();
@@ -515,7 +525,7 @@ final readonly class GrantPruner
      */
     private static function countBoundaries(Reference $grantee): int
     {
-        return AuthorizationConnection::connection()->table(self::table('authorizable_boundaries'))
+        return self::table('authorizable_boundaries')
             ->where('authorizable_type', $grantee->type)
             ->where('authorizable_id', $grantee->id)
             ->count();
@@ -523,8 +533,8 @@ final readonly class GrantPruner
 
     /**
      * Count the grants of every kind the grantee holds, in every scope, that
-     * have not expired: a real run removes an expired one among the expired,
-     * before it revokes the grantee's grants.
+     * have not expired, and its activations not ended or expired: a real run
+     * removes an expired grant and records an expired activation first.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return int
@@ -540,6 +550,10 @@ final readonly class GrantPruner
                 ->count();
         }
 
-        return $count;
+        $activations = self::table('break_glass')
+            ->where('authorizable_type', $grantee->type)
+            ->where('authorizable_id', $grantee->id);
+
+        return $count + BreakGlassActivations::unexpired($activations, TableNames::get('break_glass'))->count();
     }
 }

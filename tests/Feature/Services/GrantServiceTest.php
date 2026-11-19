@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -17,6 +19,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -26,6 +29,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
@@ -50,13 +54,16 @@ use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\BreakGlassService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -66,6 +73,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleReach;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
@@ -106,12 +114,20 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
-        ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
-        RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
+    use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions,
+        CatchesRefusals, ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents,
+        RecordsRowLocks, RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
+
+    /** @var list<string> The rights revoking everything asks for beside the break-glass revoke right. */
+    private const array REVOKE_ALL = [
+        PackagePermissions::ROLE_REVOKE,
+        PackagePermissions::PERMISSION_REVOKE,
+        PackagePermissions::POLICY_DETACH,
+        PackagePermissions::BOUNDARY_REMOVE,
+    ];
 
     /**
      * Freeze the clock.
@@ -397,11 +413,151 @@ final class GrantServiceTest extends TestCase
 
         self::assertCount(1, $operations);
         self::assertSame(
-            [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
+            [...self::REVOKE_ALL, PackagePermissions::BREAK_GLASS_REVOKE],
             $events[0]->operation->actions,
         );
         self::assertSame([], $user->getRoles());
         self::assertSame(0, self::service()->revokeAll($user));
+    }
+
+    /**
+     * Revoking everything ends each of the grantee's unexpired activations as
+     * revoked by no one, locked, counted and reported in the same operation as
+     * its grants; an expired or ended one, and another grantee's, are left as
+     * they were, and the next check no longer reads the role.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingEndsTheGranteesActivations(): void
+    {
+        $user    = self::user();
+        $tenant  = self::createTenant('tenant-a');
+        $role    = self::emergencyRole();
+        $live    = self::activate($user, $role);
+        $scoped  = self::activate($user, $role, [...self::ownedBy($tenant), 'include_subtree' => false, 'application' => 'admin']);
+        $expired = self::activate($user, $role, ['expires_at' => Carbon::now()->subMinute()]);
+        $ended   = self::activate($user, $role, ['ended_at' => Carbon::now()->subMinute(), 'end_reason' => 'surrendered']);
+        $other   = self::activate(StubGrantee::create(['id' => 'user-2']), $role);
+
+        self::service()->grantRole($user, self::role('editor'));
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+
+        Event::fake([RoleRevoked::class, BreakGlassRevoked::class]);
+
+        $locks = $this->recordRowLocks();
+
+        self::assertSame(3, self::service()->revokeAll($user));
+        self::assertSame([self::NOW, null, null, 'revoked'], self::endedOf($live));
+        self::assertSame([self::NOW, null, null, 'revoked'], self::endedOf($scoped));
+        self::assertSame([null, null, null, null], self::endedOf($expired));
+        self::assertSame(['2026-07-01 11:59:00', null, null, 'surrendered'], self::endedOf($ended));
+        self::assertSame([null, null, null, null], self::endedOf($other));
+        self::assertContains('break_glass_activations', \array_column($locks->getArrayCopy(), 0));
+
+        $revocations = self::dispatchedEvents(BreakGlassRevoked::class);
+        $operation   = self::dispatchedEvents(RoleRevoked::class)[0]->operation;
+
+        self::assertEquals(
+            [$live->id => new GrantScope(null, null, true), $scoped->id => new GrantScope(Reference::of($tenant), 'admin', false)],
+            \array_column($revocations, 'scope', 'activation'),
+        );
+        self::assertSame([$operation->id, $operation->id], \array_map(static fn (BreakGlassRevoked $event): string => $event->operation->id, $revocations));
+        self::assertSame([...self::REVOKE_ALL, PackagePermissions::BREAK_GLASS_REVOKE], $operation->actions);
+        self::assertTrue($operation->isTrusted);
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:create'));
+    }
+
+    /**
+     * Revoking everything ends an activation while break-glass is switched off,
+     * which counts for nothing then but would once it is switched on.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingEndsActivationsWhileBreakGlassIsOff(): void
+    {
+        $user       = self::user();
+        $activation = self::activate($user, self::emergencyRole());
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+
+        self::switchBreakGlass(false);
+
+        Event::fake([BreakGlassRevoked::class]);
+
+        self::assertSame(1, self::service()->revokeAll($user));
+        self::assertSame([self::NOW, null, null, 'revoked'], self::endedOf($activation));
+        Event::assertDispatchedTimes(BreakGlassRevoked::class, 1);
+
+        self::switchBreakGlass(true);
+
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:create'));
+    }
+
+    /**
+     * Revoking everything from a grantee whose only access is an activation
+     * drops a check the shared cache stored on it, from the next request.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingDropsACheckCachedOnAnActivation(): void
+    {
+        $user    = self::user();
+        $store   = new CacheRepository(new ArrayStore);
+        $request = fn () => $this->app?->instance(ResolutionCache::class, new ResolutionCache($store, 300, 'revoke-all'));
+        $check   = static fn (): bool => StubGrantee::query()->findOrFail('user-1')->hasPermission('posts:create');
+
+        self::activate($user, self::emergencyRole());
+
+        $request();
+
+        self::assertTrue($check());
+
+        $request();
+
+        self::assertSame(1, self::service()->revokeAll($user));
+
+        $request();
+
+        self::assertFalse($check());
+    }
+
+    /**
+     * Revoking everything that fails while ending an activation keeps the
+     * grants it revoked and the activation, and reports nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingThatFailsEndingAnActivationRollsBack(): void
+    {
+        $user       = self::user();
+        $editor     = self::role('editor');
+        $activation = self::activate($user, self::emergencyRole());
+
+        self::service()->grantRole($user, $editor);
+
+        Event::fake([RoleRevoked::class, BreakGlassRevoked::class]);
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (!\str_starts_with(\strtolower($query->sql), 'update') || !\str_contains($query->sql, 'break_glass_activations')) {
+                return;
+            }
+
+            throw new \RuntimeException('Write failed.');
+        });
+
+        self::assertSame('Write failed.', self::refusalOf(static fn (): int => self::service()->revokeAll($user))->getMessage());
+        self::assertSame([$editor->id], DB::table('authorizable_roles')->pluck('role_id')->all());
+        self::assertSame([null, null, null, null], self::endedOf($activation));
+        Event::assertNothingDispatched();
     }
 
     /**
@@ -2402,9 +2558,60 @@ final class GrantServiceTest extends TestCase
 
         self::assertSame(0, self::service()->revokeAll($empty, $admin));
         self::assertSame(
-            [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
+            [...self::REVOKE_ALL, PackagePermissions::BREAK_GLASS_REVOKE],
             self::actionsDecided(),
         );
+    }
+
+    /**
+     * Revoking everything for an acting context decides the end of each
+     * activation under the break-glass revoke right in the activation's scope,
+     * before anything is written: an actor holding the other rights alone, or
+     * the revoke right only in another scope, is refused with nothing changed,
+     * and one holding it there ends each as itself; an expired one is left
+     * alone and decides nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingDelegatedNeedsTheRevokeRightForEachActivation(): void
+    {
+        $user     = self::user();
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::emergencyRole();
+        $scoped   = self::activate($user, $role, self::ownedBy($tenant));
+        $platform = self::activate($user, $role);
+        $expired  = self::activate($user, $role, ['expires_at' => Carbon::now()->subMinute()]);
+        $actor    = self::administrator(self::REVOKE_ALL, 'revoker');
+
+        /** @var \Tests\Feature\Stubs\StubGrantee $admin */
+        $admin = $actor->subject->subject;
+
+        self::service()->grantPermission($user, self::permission('posts:edit'));
+
+        $this->actAsTenant($tenant);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($user, $actor));
+
+        self::service()->grantPermission($admin, self::permission(PackagePermissions::BREAK_GLASS_REVOKE), tenant: $tenant);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($user, $actor));
+        self::assertSame([null, null, null, null], self::endedOf($scoped));
+
+        BreakGlassService::instance()?->revoke($platform);
+
+        self::fakePackageEvents();
+
+        self::assertSame(2, self::service()->revokeAll($user, $actor));
+        self::assertSame([self::NOW, $admin->getMorphClass(), 'revoker', 'revoked'], self::endedOf($scoped));
+        self::assertSame([null, null, null, null], self::endedOf($expired));
+        self::assertContains(PackagePermissions::BREAK_GLASS_REVOKE, self::actionsDecided());
+
+        $revocations = self::dispatchedEvents(BreakGlassRevoked::class);
+
+        self::assertCount(1, $revocations);
+        self::assertEquals([$scoped->id, $actor->principal()], [$revocations[0]->activation, $revocations[0]->actor()]);
     }
 
     /**
@@ -3902,7 +4109,7 @@ final class GrantServiceTest extends TestCase
         /** @var \Tests\Feature\Stubs\StubGrantee $admin */
         $admin = $actor->subject->subject;
 
-        foreach ([PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE] as $name) {
+        foreach (self::REVOKE_ALL as $name) {
             self::service()->grantPermission($admin, self::permission($name), tenant: $tenant);
         }
 
@@ -3935,6 +4142,19 @@ final class GrantServiceTest extends TestCase
     private static function permission(string $name): Permission
     {
         return Permission::query()->firstOrCreate(['name' => $name]);
+    }
+
+    /**
+     * Return when the activation ended, as stored, who ended it and why.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
+     * @return list<string|null>
+     */
+    private static function endedOf(BreakGlassActivation $activation): array
+    {
+        $stored = BreakGlassActivation::query()->findOrFail($activation->id);
+
+        return [$stored->ended_at?->toDateTimeString(), $stored->ended_by_type, $stored->ended_by_id, $stored->end_reason];
     }
 
     /**

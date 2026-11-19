@@ -44,18 +44,20 @@ operation's events alone.
 
 `authorization:prune` removes the grants that no longer count: a role's expired grants of permissions, reported as
 `Role\PermissionExpired`, and the other expired grants, reported as `RoleExpired`, `PermissionExpired` or
-`PolicyExpired`, each with no actor, then the permission boundaries of a grantee deleted without its model events,
-such as by a raw query, reported as `Grantee\BoundaryRemoved` and counted apart from its grants, a grantee whose only
-rows are boundaries included, then its grants, reported as revoked, then the inline policies of such a grantee,
-reported as deleted, and last the resource policy attachments of a record that no longer exists, reported as
+`PolicyExpired`, each with no actor, then the permission boundaries of a grantee deleted without its model events, such
+as by a raw query, reported as `Grantee\BoundaryRemoved` and counted apart from its grants, a grantee whose only rows
+are boundaries included, then its grants, reported as revoked, then the inline policies of such a grantee, reported as
+deleted, and last the resource policy attachments of a record that no longer exists, reported as
 `Resource\PolicyDetached`. The record's morph type is resolved to its model class as a grantee's is; a type that names
 no model class is reported and its records' attachments are left, and a whole type's attachments are never removed. A
 soft-deleted grantee keeps its grants, its boundaries and its inline policies, and a soft-deleted record its
 attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small rather
 than making checks correct. It never removes a break-glass activation: one that expired without ending has its expiry
-recorded on its row and is reported as `Grantee\BreakGlassExpired`, counted apart. Like `model:prune`, it takes
-`--pretend`, which counts exactly what a run would remove or record, the boundaries apart from the grants as a run does,
-and `--chunk`, and is scheduled like any command:
+recorded on its row and is reported as `Grantee\BreakGlassExpired`, counted apart, and an unexpired one of a grantee
+that is gone, a grantee whose only live row it is included, is ended with its grants, reported as
+`Grantee\BreakGlassRevoked` and counted among them. Like `model:prune`, it takes `--pretend`, which counts exactly what
+a run would remove or record, the boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like
+any command:
 
 ```php
 use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
