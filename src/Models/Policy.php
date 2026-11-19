@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 
 /**
@@ -152,11 +153,13 @@ class Policy extends Model
     /**
      * Interact with the document attribute, refusing a write the policy
      * validator does not accept: an invalid policy, one over the limits, or one
-     * naming actions the code does not declare.
+     * naming actions the code does not declare. A document with the content
+     * already stored, whatever order its keys are in, is no change.
      *
      * @return \Illuminate\Database\Eloquent\Casts\Attribute<array<string, mixed>, mixed>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     * @throws \JsonException
      */
     protected function document(): Attribute
     {
@@ -171,7 +174,15 @@ class Policy extends Model
                 // The validator refuses a document that cannot be encoded as
                 // JSON, so this does not throw; were it ever to, the write
                 // would fail rather than store an empty document.
-                return \json_encode($document, \JSON_THROW_ON_ERROR);
+                $encoded = \json_encode($document, \JSON_THROW_ON_ERROR);
+
+                // MySQL's JSON column reorders an object's keys, so the same
+                // content keeps the text stored and is no change.
+                $stored  = $this->getRawOriginal('document');
+                $kept    = \is_string($stored) ? \json_decode($stored, true) : null;
+                $written = \json_decode($encoded, true);
+
+                return \is_array($kept) && \is_array($written) && DocumentDigest::of($kept)->digest === DocumentDigest::of($written)->digest ? $stored : $encoded;
             },
         );
     }
