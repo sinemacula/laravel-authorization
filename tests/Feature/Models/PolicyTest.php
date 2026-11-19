@@ -6,6 +6,7 @@ namespace Tests\Feature\Models;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
@@ -200,6 +201,35 @@ final class PolicyTest extends StringCastsTestCase
         $this->expectRefusal('Invalid policy document \'readers\': Policy statement #0 actions pattern \'comments:create\' matches no declared permission.');
 
         self::write(['statements' => [['effect' => 'allow', 'actions' => ['comments:create']]]]);
+    }
+
+    /**
+     * A document stored with its keys in another order, as MySQL's JSON column
+     * stores them, and a whole float as an integer, is unchanged when written
+     * again, and changed when any of its content differs.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testADocumentIsComparedByItsContent(): void
+    {
+        $statement = ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['gt' => ['mfa.seconds_since_step_up' => 900.0]]];
+        $policy    = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => [$statement]]]);
+
+        $reordered = ['name' => 'readers', 'statements' => [\array_reverse($statement)]];
+
+        DB::table('policies')->where('id', $policy->id)->update(['document' => \json_encode($reordered, \JSON_THROW_ON_ERROR)]);
+
+        $stored = Policy::query()->findOrFail($policy->id);
+
+        $stored->document = ['statements' => [$statement]];
+
+        self::assertFalse($stored->isDirty());
+
+        $stored->document = ['statements' => [[...$statement, 'actions' => ['posts:edit']]]];
+
+        self::assertTrue($stored->isDirty('document'));
     }
 
     /**
