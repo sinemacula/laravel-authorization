@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged;
@@ -633,6 +634,8 @@ final class RoleServiceTest extends TestCase
      * guard-agnostic.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testListsTheRoles(): void
     {
@@ -642,6 +645,45 @@ final class RoleServiceTest extends TestCase
 
         self::assertSame(['auditor', 'editor', 'viewer'], self::service()->list()->pluck('name')->all());
         self::assertSame(['auditor', 'viewer'], self::service()->list('api')->pluck('name')->all());
+    }
+
+    /**
+     * An actor lists roles only when allowed `authorization:role.read` in the
+     * scope in place: a grant in a tenant counts there and nowhere else.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActorListsRolesOnlyWithTheReadRight(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $other  = self::createTenant('tenant-b');
+        $reader = self::administrator([PackagePermissions::ROLE_READ], rank: null);
+        $nobody = self::administrator([], 'nobody', null);
+        $admin  = StubGrantee::create(['id' => 'admin-2']);
+        $local  = ActingContext::for($admin);
+        $read   = Permission::query()->where('name', PackagePermissions::ROLE_READ)->firstOrFail();
+        $failed = static fn (AuthorizationFailed $event): bool => $event->action === PackagePermissions::ROLE_READ && $event->resource === null;
+
+        app(GrantService::class)->grantPermission($admin, $read, tenant: $other);
+        self::role('editor');
+
+        $this->actAsTenant($tenant);
+        self::fakePackageEvents();
+
+        self::assertSame(['editor'], self::service()->list()->pluck('name')->all());
+        self::assertSame([], self::actionsDecided());
+        self::assertSame(['editor'], self::service()->list(actor: $reader)->pluck('name')->all());
+
+        foreach ([$local, $nobody] as $actor) {
+            self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->list(actor: $actor));
+            Event::assertDispatched(AuthorizationFailed::class, $failed);
+        }
+
+        $this->actAsTenant($other);
+
+        self::assertSame(['editor'], self::service()->list(actor: $local)->pluck('name')->all());
     }
 
     /**
