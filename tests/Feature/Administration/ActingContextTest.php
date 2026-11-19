@@ -401,6 +401,33 @@ final class ActingContextTest extends TestCase
     }
 
     /**
+     * An action authorised on no resource passes when the actor is allowed it,
+     * and is refused, with the call's caps, and reported with
+     * `AuthorizationFailed`, when it is not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActionIsAuthorizedOnNoResource(): void
+    {
+        Event::fake([AuthorizationFailed::class]);
+
+        $admin = StubGrantee::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $actor = ActingContext::for($admin);
+
+        $actor->authorizeAction('posts:read');
+
+        self::assertSame(DecisionReason::NO_MATCH, self::reasonOf(static fn () => $actor->authorizeAction('posts:edit')));
+        self::assertSame(DecisionReason::SESSION_POLICY, self::reasonOf(static fn () => $actor->capped(['posts:edit'])->authorizeAction('posts:read')));
+        Event::assertDispatchedTimes(AuthorizationFailed::class, 2);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === 'posts:edit' && $event->resource === null);
+    }
+
+    /**
      * A service's refusal is reported inside the operation's transaction: a
      * listener's write on the package's connection rolls back with it, and one
      * on a connection of its own survives.
