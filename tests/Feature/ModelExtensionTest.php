@@ -170,7 +170,10 @@ final class ModelExtensionTest extends TestCase
         $role->delete();
         $child->update(['parent_id' => $role->id]);
 
-        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:edit'));
+        $user = StubGrantee::query()->findOrFail('user-1');
+
+        self::assertSame([], $user->getRoles());
+        self::assertFalse(Authorization::for($user)->can('posts:edit'));
         self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-2'))->can('posts:edit'));
 
         $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
