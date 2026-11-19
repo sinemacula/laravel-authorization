@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -32,6 +33,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Fixtures\SoftDeletingRole;
 use Tests\TestCase;
 
 /**
@@ -296,6 +298,33 @@ final class InvalidationTest extends TestCase
         $this->nextRequest();
 
         self::assertSame('deny', $this->fresh($user)->getPolicies()[0]->statements[0]->effect->value);
+    }
+
+    /**
+     * A soft-deleting role restored bumps the role and its holders; any other
+     * update, or a role class without soft deletes, bumps the role alone.
+     *
+     * @return void
+     */
+    public function testARestoredRoleBumpsItsHolders(): void
+    {
+        $versions = $this->versions();
+        $user     = StubGrantee::create(['id' => 'user-1']);
+        $role     = Role::create(['name' => 'editor']);
+
+        $user->assignRole($role);
+
+        $ref      = Reference::of($role);
+        $restored = new RoleUpdated(Operation::begin(), $ref, 'editor', null, null, ['before' => ['deleted_at' => '2026-01-01'], 'after' => ['deleted_at' => null]]);
+        $renamed  = new RoleUpdated(Operation::begin(), $ref, 'editor', null, null, ['before' => ['name' => 'author'], 'after' => ['name' => 'editor']]);
+        $key      = $versions->roleKey($role->id);
+
+        self::assertSame([$key], Invalidation::keys($versions, [$restored]));
+
+        config(['authorization.models.role' => SoftDeletingRole::class]);
+
+        self::assertSame([$key, $versions->granteeKey($user)], Invalidation::keys($versions, [$restored]));
+        self::assertSame([$key], Invalidation::keys($versions, [$renamed]));
     }
 
     /**
