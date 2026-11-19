@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
@@ -21,12 +24,17 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -43,7 +51,8 @@ use Tests\TestCase;
 #[CoversClass(PermissionService::class)]
 final class PermissionServiceTest extends TestCase
 {
-    use ComparesReferences, DeclaresPermissions, RefusesThePackage, UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, DeclaresPermissions, RefusesThePackage,
+        UsesAnAuthorizationConnection;
 
     /**
      * A name finds the permission the lookup ranks first under the guard, and
@@ -226,6 +235,8 @@ final class PermissionServiceTest extends TestCase
      * guard-agnostic.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testListsThePermissions(): void
     {
@@ -235,6 +246,47 @@ final class PermissionServiceTest extends TestCase
 
         self::assertSame(['posts:audit', 'posts:edit', 'posts:view'], self::service()->list()->pluck('name')->all());
         self::assertSame(['posts:audit', 'posts:view'], self::service()->list('api')->pluck('name')->all());
+    }
+
+    /**
+     * An actor lists permissions only when allowed
+     * `authorization:permission.read` in the scope in place: a grant in a
+     * tenant counts there and nowhere else.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActorListsPermissionsOnlyWithTheReadRight(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $other  = self::createTenant('tenant-b');
+        $reader = self::administrator([PackagePermissions::PERMISSION_READ], rank: null);
+        $nobody = self::administrator([], 'nobody', null);
+        $admin  = StubGrantee::create(['id' => 'admin-2']);
+        $local  = ActingContext::for($admin);
+        $read   = Permission::query()->where('name', PackagePermissions::PERMISSION_READ)->firstOrFail();
+        $listed = [PackagePermissions::PERMISSION_READ, 'posts:edit'];
+        $failed = static fn (AuthorizationFailed $event): bool => $event->action === PackagePermissions::PERMISSION_READ && $event->resource === null;
+
+        app(GrantService::class)->grantPermission($admin, $read, tenant: $other);
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        $this->actAsTenant($tenant);
+        self::fakePackageEvents();
+
+        self::assertSame($listed, self::service()->list()->pluck('name')->all());
+        self::assertSame([], self::actionsDecided());
+        self::assertSame($listed, self::service()->list(actor: $reader)->pluck('name')->all());
+
+        foreach ([$local, $nobody] as $actor) {
+            self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->list(actor: $actor));
+            Event::assertDispatched(AuthorizationFailed::class, $failed);
+        }
+
+        $this->actAsTenant($other);
+
+        self::assertSame($listed, self::service()->list(actor: $local)->pluck('name')->all());
     }
 
     /**

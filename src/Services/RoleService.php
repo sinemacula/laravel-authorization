@@ -80,12 +80,12 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * `UndeclaredPermissionException` before anything is written. A role keeps an
  * undeclared permission it carries until it is revoked.
  *
- * Each method takes the acting context making the call as `$actor`, the reads
- * as well as the writes: null for trusted system work, such as seeders,
- * migrations and console commands. A write with an acting context is delegated
- * administration: each change it makes is decided as the actor, through
- * `check()`, on the change's operation resource, inside the write's transaction
- * before anything is written, and the first refused throws the decision's
+ * Each write, and `list()`, takes the acting context making the call as
+ * `$actor`: null for trusted system work, such as seeders, migrations and
+ * console commands. A write with an acting context is delegated administration:
+ * each change it makes is decided as the actor, through `check()`, on the
+ * change's operation resource, inside the write's transaction before anything
+ * is written, and the first refused throws the decision's
  * `AuthorizationException`, leaving nothing written. A change to the role
  * itself is decided under `authorization:role.create`, `.rename`, `.update`,
  * `.delete` or `.parent.set`; adding a permission, a new grant or a changed
@@ -111,18 +111,18 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * grant would, and a role a deny reaches is never deleted (see
  * `DefinitionConstraints`). A delegated change weighs, and writes, the role as
  * stored, discarding changes to the model in hand that were not saved, and the
- * permission it adds as stored (see `StoredRecords`). A read is not decided
- * yet. Every event a write dispatches carries the operation, with the actor,
- * its mode and the actions, once the write commits; the actor is never read
- * from the authenticated user.
+ * permission it adds as stored (see `StoredRecords`). `list()` with an acting
+ * context is decided as the actor under `authorization:role.read`, on no
+ * resource, in the scope in place, before anything is read (see
+ * `ActingContext::authorizeAction()`). Every event a write dispatches carries
+ * the operation, with the actor, its mode and the actions, once the write
+ * commits; the actor is never read from the authenticated user.
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before it reads or writes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @SuppressWarnings("php:S1172")
  */
 final class RoleService
 {
@@ -236,10 +236,15 @@ final class RoleService
      * @param  string|null  $guard
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function list(?string $guard = null, ?ActingContext $actor = null): Collection
     {
         PackageState::guardCurrent();
+
+        $actor?->authorizeAction(PackagePermissions::ROLE_READ);
 
         // @phpstan-ignore staticMethod.dynamicCall
         return self::roleClass()::query()

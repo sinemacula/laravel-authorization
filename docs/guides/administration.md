@@ -39,8 +39,7 @@ writes them and a policy naming them validates:
 | `role-exclusion.declare`, `role-exclusion.remove`                                  | A pair of mutually exclusive roles declared or removed               |
 | `break-glass.activate`, `break-glass.grant`, `break-glass.revoke`                  | A break-glass activation for oneself or another, or its end          |
 | `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
-| `policy.read`                                                                      | Listing policies through `PolicyService`, on no resource             |
-| `role.read`, `permission.read`                                                     | Reading and listing roles and permissions; declared, never decided   |
+| `role.read`, `permission.read`, `policy.read`                                      | Listing roles, permissions or policies through their services        |
 | `permission.grantable`, `policy.grantable`                                         | Delegating a permission, or one version of a policy, not held        |
 | `administration.self`, `administration.impersonated`                               | A change that benefits the actor; a change made while impersonating  |
 | `administration.unbounded`                                                         | Replacing a boundary with a wider one, or removing one               |
