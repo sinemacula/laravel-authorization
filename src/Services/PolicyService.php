@@ -13,12 +13,14 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Creates, renames, describes, rewrites, deletes and lists policies.
+ * Creates, renames, describes, rewrites, deletes and lists policies, and
+ * creates and lists inline policies.
  *
  * Every write runs in one transaction on the package's connection, through the
  * policy class `authorization.models.policy` configures, so the policy
@@ -29,7 +31,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * A policy `create()` makes is managed: attached to any number of grantees and
  * roles. One `createInline()` makes belongs to one grantee, is attached to that
  * grantee alone, and is deleted with it; its name is unique among that
- * grantee's inline policies. Both validate the document the same way.
+ * grantee's inline policies. Both validate the document the same way. `list()`
+ * shows the managed policies visible from the current tenant: the platform's,
+ * the tenant's own and its ancestors', or the platform's alone outside any
+ * tenant, filtered by the tenant chain itself, since the policy model carries
+ * no tenant scope. `listInline()` shows one grantee's inline policies.
  *
  * Each method takes the acting context making the call as `$actor`, the reads
  * as well as the writes: null for trusted system work, such as seeders,
@@ -51,18 +57,18 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * that lifts a deny is refused as `administration.unprovable`; one that adds
  * allows is weighed against every holder of the policy and needs the policy
  * route for what it adds, and, for a policy in use as a boundary,
- * `authorization:administration.unbounded` (see `PolicyRewrite`). A read is not
- * decided yet. Every event a write dispatches carries the operation, with the
- * actor, its mode and the action, once the write commits; the actor is never
- * read from the authenticated user.
+ * `authorization:administration.unbounded` (see `PolicyRewrite`). A read with
+ * an acting context is decided as the actor under `authorization:policy.read`,
+ * on no resource, in the scope in place, before anything is read (see
+ * `ActingContext::authorizeAction()`). Every event a write dispatches carries
+ * the operation, with the actor, its mode and the action, once the write
+ * commits; the actor is never read from the authenticated user.
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before it reads or writes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @SuppressWarnings("php:S1172")
  */
 final class PolicyService
 {
@@ -85,8 +91,7 @@ final class PolicyService
     {
         PackageState::guardCurrent();
 
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = ModelClasses::get('policy');
+        $class = self::policyClass();
 
         return RecordWriter::save($actor, PackagePermissions::POLICY_CREATE, static fn (): Policy => RecordWriter::ownedBy(new $class, $tenant), [
             'name'        => $name,
@@ -116,9 +121,7 @@ final class PolicyService
         PackageState::guardCurrent();
 
         $reference = self::owner($owner);
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = ModelClasses::get('policy');
+        $class     = self::policyClass();
 
         return RecordWriter::save($actor, PackagePermissions::POLICY_CREATE, static fn (): Policy => new $class, [
             'name'        => $name,
@@ -199,25 +202,57 @@ final class PolicyService
     }
 
     /**
-     * List the policies, by name.
+     * List the managed policies visible from the current tenant, by name: the
+     * platform's, the tenant's own and its ancestors', or the platform's alone
+     * outside any tenant. Inline policies are listed by `listInline()`.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function list(?ActingContext $actor = null): Collection
     {
         PackageState::guardCurrent();
 
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = ModelClasses::get('policy');
+        $actor?->authorizeAction(PackagePermissions::POLICY_READ);
 
-        return $class::query()->orderBy('name')->get();
+        $query = self::policyClass()::query()->whereNull('owner_type');
+
+        return TenantScope::currentChain()->owners($query, 'tenant_type', 'tenant_id')->orderBy('name')->get();
     }
 
     /**
-     * Return the reference to the grantee an inline policy is created for, once
-     * it is known to be one a grant can be written for: a saved model with a
-     * key, or a reference with a type and a key.
+     * List the inline policies of the grantee, by name.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $owner
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException
+     */
+    public function listInline(Model|Reference $owner, ?ActingContext $actor = null): Collection
+    {
+        PackageState::guardCurrent();
+
+        $reference = self::owner($owner);
+
+        $actor?->authorizeAction(PackagePermissions::POLICY_READ);
+
+        return self::policyClass()::query()
+            ->where('owner_type', $reference->type)
+            ->where('owner_id', $reference->id)
+            ->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * Return the reference to the grantee of an inline policy, once it is known
+     * to be one a grant can be written for: a saved model with a key, or a
+     * reference with a type and a key.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $owner
      * @return \SineMacula\Laravel\Authorization\Support\Reference
@@ -233,5 +268,16 @@ final class PolicyService
         }
 
         return $reference;
+    }
+
+    /**
+     * Return the policy class `authorization.models.policy` configures.
+     *
+     * @return class-string<\SineMacula\Laravel\Authorization\Models\Policy>
+     */
+    private static function policyClass(): string
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> */
+        return ModelClasses::get('policy');
     }
 }
