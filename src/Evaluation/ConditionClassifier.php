@@ -18,8 +18,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
  * test does not accept is `null`; an undecidable test on a present key is
  * `unresolved` when a `${…}` reference of its operand could not be resolved,
  * `undecidable` when the substituted operand has the wrong type, or is a string
- * a string operator cannot test (empty, or holding a NUL byte) while the value
- * is one it can, and `wrong_type` otherwise.
+ * a string operator cannot test (empty, holding a NUL byte or too long for
+ * `like`) while the value is one it can, and `wrong_type` otherwise.
  *
  * @phpstan-import-type ConditionTest from \SineMacula\Laravel\Authorization\Evaluation\StatementValidator
  *
@@ -123,11 +123,12 @@ final class ConditionClassifier
     }
 
     /**
-     * Determine whether an undecidable test is its substituted operand's doing:
-     * a string operator against a string value without a NUL byte, which it can
-     * test, is left undecidable only by an empty operand or one holding a NUL
-     * byte, and a literal operand of either kind is refused with the condition,
-     * so the operand came from a substituted value.
+     * Determine whether an undecidable test is its operand's doing: a string
+     * operator against a string value it can test, without a NUL byte and not
+     * too long for it, is left undecidable only by an operand that is empty,
+     * holds a NUL byte or is too long for `like`; a literal operand of the
+     * first two kinds is refused with the condition, so such an operand came
+     * from a substituted value.
      *
      * @param  ConditionTest  $test
      * @param  mixed  $actual
@@ -135,6 +136,9 @@ final class ConditionClassifier
      */
     private static function isSubstitutedStringUntestable(array $test, mixed $actual): bool
     {
-        return \in_array($test['operator'], self::STRING_OPERATORS, true) && \is_string($actual) && !\str_contains($actual, "\0");
+        return \in_array($test['operator'], self::STRING_OPERATORS, true)
+            && \is_string($actual)
+            && !\str_contains($actual, "\0")
+            && !ConditionEvaluator::isTooLong($test['operator'], $actual);
     }
 }

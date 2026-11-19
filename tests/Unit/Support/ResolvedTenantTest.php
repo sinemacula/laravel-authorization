@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Unit\Support;
 
 use Illuminate\Container\Container;
+use Illuminate\Database\DatabaseTransactionsManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -161,6 +163,43 @@ final class ResolvedTenantTest extends TestCase
         self::assertSame([], (new ResolvedTenant($resolver, null))->chain($unused)->tenants);
         self::assertFalse($resolved->isBelow);
         self::assertFalse($resolved->chain($first)->isBelow);
+    }
+
+    /**
+     * The chain held is read again once a change to the tree is reported, and a
+     * refreshed one is held as read under the tree as it stands.
+     *
+     * @return void
+     */
+    public function testTheChainIsReadAgainOnceATreeChangeIsReported(): void
+    {
+        [$first, $moved, $refreshed] = \array_map(static fn (string $id): array => [new Reference('stub_tenant', $id)], ['first', 'moved', 'refreshed']);
+        $tree                        = $this->createMock(TenantTree::class);
+
+        $tree->expects(self::exactly(3))->method('ancestors')->willReturnOnConsecutiveCalls($first, $moved, $refreshed);
+
+        $resolved  = new ResolvedTenant(self::createStub(SubjectResolver::class), new Reference('stub_tenant', 'org'));
+        $parent    = static fn (): array => \array_slice($resolved->chain($tree)->tenants, 1);
+        $container = new Container;
+
+        $container->instance('db.transactions', new DatabaseTransactionsManager);
+
+        Container::setInstance($container);
+
+        try {
+            self::assertEquals($first, $parent());
+            self::assertEquals($first, $parent());
+
+            TenantScope::treeChanged();
+
+            self::assertEquals($moved, $parent());
+
+            $resolved->refreshChain($tree);
+
+            self::assertEquals($refreshed, $parent());
+        } finally {
+            Container::setInstance(null);
+        }
     }
 
     /**

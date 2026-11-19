@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -16,6 +18,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\InterleavesWrites;
 use Tests\TestCase;
 
 /**
@@ -31,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(ExpiringGrants::class)]
 final class ExpiringGrantsTest extends TestCase
 {
+    use InterleavesWrites;
+
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
 
@@ -71,7 +76,7 @@ final class ExpiringGrantsTest extends TestCase
 
         $change = $table->grant($permission->id, Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris'));
 
-        self::assertSame(GrantOutcome::GRANTED, $change->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $change?->outcome);
         self::assertNull($change->previousExpiresAt);
         self::assertSame(['2026-07-02 12:00:00'], self::expiries());
     }
@@ -92,9 +97,9 @@ final class ExpiringGrantsTest extends TestCase
         $same    = $table->grant($permission->id, Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris'));
         $forever = $table->grant($other->id, null);
 
-        self::assertSame(GrantOutcome::UNCHANGED, $same->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $same?->outcome);
         self::assertSame('2026-07-02 12:00:00', $same->previousExpiresAt?->format('Y-m-d H:i:s'));
-        self::assertSame(GrantOutcome::UNCHANGED, $forever->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $forever?->outcome);
         self::assertNull($forever->previousExpiresAt);
     }
 
@@ -114,10 +119,10 @@ final class ExpiringGrantsTest extends TestCase
         $forever = $table->grant($permission->id, null);
         $dated   = $table->grant($permission->id, Carbon::parse('2026-07-04 12:00:00'));
 
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $later->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $later?->outcome);
         self::assertSame('2026-07-02 12:00:00', $later->previousExpiresAt?->format('Y-m-d H:i:s'));
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $forever->outcome);
-        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $dated->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $forever?->outcome);
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $dated?->outcome);
         self::assertNull($dated->previousExpiresAt);
         self::assertNull($dated->previousReach);
         self::assertSame(['2026-07-04 12:00:00'], self::expiries());
@@ -134,10 +139,13 @@ final class ExpiringGrantsTest extends TestCase
         $role  = Role::query()->create(['name' => 'editor']);
         $table = GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, new GrantScope(new Reference('tenant', 'a'), null, false));
 
-        self::assertNull($table->grant($role->id, Carbon::parse(self::NOW))->previousReach);
+        $stored = $table->grant($role->id, Carbon::parse(self::NOW));
+
+        self::assertSame(GrantOutcome::GRANTED, $stored?->outcome);
+        self::assertNull($stored->previousReach);
+        self::assertFalse($table->grant($role->id, null)?->previousReach);
         self::assertFalse($table->grant($role->id, null)->previousReach);
-        self::assertFalse($table->grant($role->id, null)->previousReach);
-        self::assertFalse($table->rearm($role->id, Carbon::parse(self::NOW)->addDay(), Carbon::parse(self::NOW))->previousReach);
+        self::assertFalse($table->rearm($role->id, Carbon::parse(self::NOW)->addDay(), Carbon::parse(self::NOW))?->previousReach);
     }
 
     /**
@@ -154,7 +162,7 @@ final class ExpiringGrantsTest extends TestCase
 
         $change = $table->grant($permission->id, null);
 
-        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame(GrantOutcome::REARMED, $change?->outcome);
         self::assertSame(self::NOW, $change->previousExpiresAt?->format('Y-m-d H:i:s'));
         self::assertSame([null], self::expiries());
     }
@@ -173,9 +181,9 @@ final class ExpiringGrantsTest extends TestCase
         $table->grant($permission->id, Carbon::parse('2026-07-02 12:00:00'));
         $table->grant($other->id, null);
 
-        self::assertSame(GrantOutcome::GRANTED, $table->rearm($missing->id, null)->outcome);
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, Carbon::parse('2026-07-09 12:00:00'))->outcome);
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($other->id, Carbon::parse('2026-07-09 12:00:00'))->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $table->rearm($missing->id, null)?->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, Carbon::parse('2026-07-09 12:00:00'))?->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($other->id, Carbon::parse('2026-07-09 12:00:00'))?->outcome);
 
         Carbon::setTestNow('2026-07-02 12:00:00');
 
@@ -201,8 +209,8 @@ final class ExpiringGrantsTest extends TestCase
         $table->grant($permission->id, Carbon::parse('2026-07-01 11:00:00'));
         $table->grant($other->id, Carbon::parse('2026-07-01 13:00:00'));
 
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, null, Carbon::parse('2026-07-01 10:00:00'))->outcome);
-        self::assertSame(GrantOutcome::REARMED, $table->rearm($other->id, null, Carbon::parse('2026-07-01 13:00:00'))->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, null, Carbon::parse('2026-07-01 10:00:00'))?->outcome);
+        self::assertSame(GrantOutcome::REARMED, $table->rearm($other->id, null, Carbon::parse('2026-07-01 13:00:00'))?->outcome);
         self::assertSame('2026-07-01 11:00:00', DB::table('role_permissions')->where('permission_id', $permission->id)->value('expires_at'));
         self::assertNull(DB::table('role_permissions')->where('permission_id', $other->id)->value('expires_at'));
     }
@@ -219,7 +227,86 @@ final class ExpiringGrantsTest extends TestCase
 
         $table->grant($permission->id, Carbon::parse('2026-07-01 11:00:00'));
 
-        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, Carbon::parse('2026-07-01 11:00:00'))->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, Carbon::parse('2026-07-01 11:00:00'))?->outcome);
+    }
+
+    /**
+     * A grant or re-arm the foreign key refuses, as to a role that is gone,
+     * writes nothing, on every driver, and leaves the transaction usable.
+     *
+     * @return void
+     */
+    public function testAGrantOfARowThatIsGoneWritesNothing(): void
+    {
+        [$table, $permission] = self::grants();
+
+        DB::table('roles')->delete();
+
+        self::assertNull($table->grant($permission->id, null));
+        self::assertNull($table->rearm($permission->id, null));
+        self::assertSame([], self::expiries());
+    }
+
+    /**
+     * A held row a concurrent call removed between the ignored insert and its
+     * read is stored afresh, with the new expiry.
+     *
+     * @return void
+     */
+    public function testAHeldRowRemovedBeforeItIsReadIsStoredAfresh(): void
+    {
+        [$table, $role] = self::roleGrant();
+
+        $inserts = self::interleaveWrites('authorizable_roles', static function (): void {
+            DB::table('authorizable_roles')->delete();
+        }, static function (): void {});
+
+        self::assertSame(GrantOutcome::GRANTED, $table->grant($role->id, Carbon::parse('2026-07-09 12:00:00'))?->outcome);
+        self::assertCount(2, $inserts);
+        self::assertSame(['2026-07-09 12:00:00'], DB::table('authorizable_roles')->pluck('expires_at')->all());
+    }
+
+    /**
+     * A held row a concurrent call keeps removing, even once the write is tried
+     * again, is not reported written.
+     *
+     * @return void
+     */
+    public function testARowThatKeepsBeingRemovedIsNotReported(): void
+    {
+        [$table, $role] = self::roleGrant();
+
+        $row     = (array) DB::table('authorizable_roles')->sole();
+        $inserts = self::interleaveWrites('authorizable_roles', static function (): void {
+            DB::table('authorizable_roles')->delete();
+        }, static function () use ($row): void {
+            DB::table('authorizable_roles')->insert($row);
+        }, 2, 1);
+
+        self::assertNull($table->grant($role->id, Carbon::parse('2026-07-09 12:00:00')));
+        self::assertCount(2, $inserts);
+    }
+
+    /**
+     * A failure of the insert other than a constraint's, such as a value too
+     * long, is thrown rather than taken for a held row.
+     *
+     * @return void
+     */
+    public function testAFailureOtherThanAConstraintIsThrown(): void
+    {
+        $role    = Role::query()->create(['name' => 'editor']);
+        $failure = new QueryException('testing', 'insert', [], new \PDOException('String data, right truncated', 22001));
+
+        DB::listen(static function (QueryExecuted $query) use ($failure): void {
+            if (\str_starts_with(\strtolower($query->sql), 'insert')) {
+                throw $failure;
+            }
+        });
+
+        $this->expectExceptionObject($failure);
+
+        GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, GrantScope::platform())->grant($role->id, null);
     }
 
     /**
@@ -240,6 +327,21 @@ final class ExpiringGrantsTest extends TestCase
             Permission::query()->create(['name' => 'posts:edit']),
             Permission::query()->create(['name' => 'posts:read']),
         ];
+    }
+
+    /**
+     * Return a grantee's platform-wide role writer and a role it holds forever.
+     *
+     * @return array{\SineMacula\Laravel\Authorization\Services\Support\GrantTable, \SineMacula\Laravel\Authorization\Models\Role}
+     */
+    private static function roleGrant(): array
+    {
+        $role  = Role::query()->create(['name' => 'editor']);
+        $table = GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, GrantScope::platform());
+
+        $table->grant($role->id, null);
+
+        return [$table, $role];
     }
 
     /**

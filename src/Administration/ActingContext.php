@@ -237,6 +237,22 @@ final readonly class ActingContext
     }
 
     /**
+     * Decide the action on no resource as the acting subject, with the call's
+     * caps, in the scope in place, and throw as `authorize()` throws when it is
+     * not allowed: how a management service authorises a read.
+     *
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function authorizeAction(string $action): void
+    {
+        $this->manager()->authorize($action);
+    }
+
+    /**
      * Decide every change the operation makes through `authorize()`, each
      * correlated with the operation by its id, and throw at the first that is
      * not allowed. A service decides them all before it writes any, inside the

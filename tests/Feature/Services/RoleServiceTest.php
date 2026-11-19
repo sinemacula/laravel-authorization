@@ -857,6 +857,46 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * Granting or syncing a permission whose row is gone, or granting one to a
+     * role whose row is gone, each a model read before it was deleted, is
+     * refused as gone on every driver, with nothing written and nothing
+     * dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionOrRoleWhoseRowIsGoneIsRefused(): void
+    {
+        $role       = self::role('editor');
+        $gone       = self::role('gone');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $deleted    = Permission::query()->create(['name' => 'posts:read']);
+
+        DB::table('roles')->where('id', $gone->id)->delete();
+        DB::table('permissions')->where('id', $deleted->id)->delete();
+
+        Event::fake([PermissionGranted::class]);
+
+        $calls = [
+            'permission' => [static fn () => self::service()->grantPermission($role, $deleted), static fn () => self::service()->syncPermissions($role, [$deleted])],
+            'role'       => [static fn () => self::service()->grantPermission($gone, $permission)],
+        ];
+
+        foreach ($calls as $kind => $refused) {
+            foreach ($refused as $call) {
+                $exception = self::refusalOf($call);
+
+                self::assertInstanceOf(InvalidGrantTargetException::class, $exception);
+                self::assertSame($kind, $exception->getKind());
+            }
+        }
+
+        Event::assertNotDispatched(PermissionGranted::class);
+        self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
      * A permission is granted until an expiry, stored in UTC: the same expiry
      * changes nothing, another changes it, and an expired grant is re-armed,
      * each change reported with the expiry before and after.
@@ -1084,6 +1124,52 @@ final class RoleServiceTest extends TestCase
         self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
         self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
+     * A platform role's permission name is looked up among the platform's
+     * permissions, even in a tenant that owns one of that name.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformRolesPermissionNameIsLookedUpOnThePlatform(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::role('editor');
+        $platform = Permission::query()->create(['name' => 'posts:edit']);
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
+    }
+
+    /**
+     * Revoking from a platform role by name finds no permission only a tenant
+     * owns, so the name is unknown.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingATenantsPermissionNameFromAPlatformRoleIsUnknown(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor');
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        $this->expectException(UnknownPermissionException::class);
+
+        self::service()->revokePermission($role, 'posts:edit');
     }
 
     /**
