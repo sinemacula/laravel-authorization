@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -303,7 +304,7 @@ final class QueryAuthorizerTest extends TestCase
     /**
      * When a statement the check weighs matches a pattern against each row's
      * identifier, a row whose identifier is too long for `fnmatch()` is left
-     * out, as `check()` throws on it; with no pattern to match, it is kept.
+     * out, as `check()` denies it; with no pattern to match, it is kept.
      *
      * @return void
      */
@@ -331,6 +332,11 @@ final class QueryAuthorizerTest extends TestCase
         $user->attachPolicy(self::storedPolicy('patterned', [['effect' => 'deny', 'actions' => ['posts:view'], 'not_resources' => ['*']]]));
 
         self::assertSame(['short', 'longest'], $kept());
+
+        $documents = ScopedDocument::query()->get()->keyBy('title');
+
+        self::assertTrue(Authorization::for($user)->check('posts:view', $documents['longest'])->isAllowed());
+        self::assertSame(DecisionReason::INVALID_POLICY, Authorization::for($user)->check('posts:view', $documents['too long'])->reason);
     }
 
     /**

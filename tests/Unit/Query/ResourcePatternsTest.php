@@ -117,20 +117,6 @@ final class ResourcePatternsTest extends TestCase
     }
 
     /**
-     * A pattern of `PHP_MAXPATHLEN` bytes or more, which `fnmatch()` refuses,
-     * is refused; one a byte shorter is not.
-     *
-     * @return void
-     */
-    public function testAPatternTooLongForFnmatchIsRefused(): void
-    {
-        $type = \str_repeat('x', \PHP_MAXPATHLEN);
-
-        self::assertNull(ResourcePatterns::targetOf(\str_repeat('x', \PHP_MAXPATHLEN - 1) . '*', $type));
-        self::assertTrue(ResourcePatterns::targetOf(\str_repeat('x', \PHP_MAXPATHLEN - 2) . '*', $type)?->isAll());
-    }
-
-    /**
      * Determine whether the target names the record of the key.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\KeyTarget  $target

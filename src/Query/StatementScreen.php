@@ -31,9 +31,9 @@ use SineMacula\Laravel\Authorization\Subject;
  * statement without its resources, since they never read the row; the target is
  * compiled from its resource patterns, each resolved as `check()` resolves it
  * and compiled to a condition on the row's key (see `ResourcePatterns` and
- * `KeyConditions`). A pattern whose reference cannot be resolved, or resolves
- * to a NUL byte, makes the target undecidable unless another covers the row, as
- * `check()` finds it.
+ * `KeyConditions`). A pattern whose reference cannot be resolved, or that
+ * resolves to a NUL byte or to `PHP_MAXPATHLEN` bytes or more, makes the target
+ * undecidable unless another covers the row, as `check()` finds it.
  *
  * A statement is refused, with no pruning, when:
  *
@@ -48,7 +48,7 @@ use SineMacula\Laravel\Authorization\Subject;
  *
  * The screen also tells whether a statement has a pattern that resolves, which
  * `fnmatch()` matches against each row's identifier, so the scope can leave out
- * the rows whose identifier it would refuse as too long.
+ * the rows whose identifier is too long for it, which `check()` denies.
  *
  * Every refusal is kept, once, across every class, so they are thrown together.
  *
@@ -266,8 +266,7 @@ final class StatementScreen
 
     /**
      * Return the resource patterns, resolved as `check()` resolves them,
-     * leaving out each whose reference cannot be resolved or resolves to a NUL
-     * byte, which never reaches `fnmatch()`.
+     * leaving out each that never reaches `fnmatch()`.
      *
      * @param  array<int, string>  $patterns
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
@@ -278,9 +277,9 @@ final class StatementScreen
         $resolved = [];
 
         foreach ($patterns as $pattern) {
-            $value = $scope->pattern($pattern);
+            $value = Statement::resolvedPattern($pattern, $scope);
 
-            if ($value === null || \str_contains($value, "\0")) {
+            if ($value === null) {
                 continue;
             }
 

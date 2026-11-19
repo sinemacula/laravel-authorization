@@ -26,8 +26,7 @@ namespace SineMacula\Laravel\Authorization\Query;
  * naming every record names every such record too.
  *
  * Every other pattern is refused (null): a `*` anywhere but at the end, more
- * than one, a `?`, a `[`, a trailing lone `\`, or a pattern of `PHP_MAXPATHLEN`
- * bytes or more, which `fnmatch()` refuses.
+ * than one, a `?`, a `[` or a trailing lone `\`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +45,7 @@ final class ResourcePatterns
      */
     public static function targetOf(string $pattern, string $type): ?KeyTarget
     {
-        $decoded = \strlen($pattern) < \PHP_MAXPATHLEN ? self::decode($pattern) : null;
+        $decoded = self::decode($pattern);
 
         if ($decoded === null) {
             return null;

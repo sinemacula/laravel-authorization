@@ -151,6 +151,9 @@ Conditions name the operator first, then each context key it tests, as a dot pat
   a resource pattern unresolved.
 - A `like` context value or operand of `PHP_MAXPATHLEN` bytes or more (1024 on macOS, 4096 on Linux) is undecidable,
   since `fnmatch()` cannot test it, so a deny on a long `input.*` value applies.
+- A resource pattern of `PHP_MAXPATHLEN` bytes or more once resolved and escaped (1024 on macOS, 4096 on Linux) is
+  unresolved, since `fnmatch()` cannot test it, so a deny on a long `${input.*}` id applies. A resource identifier that
+  long denies the check as `invalid_policy` whenever a statement matches a pattern against it.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${...}` interpolation; list operands
