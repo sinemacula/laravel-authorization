@@ -73,7 +73,7 @@ final class UsagePruner
             ->whereNotExists(static function (Builder $exists) use ($usage, $grants, $kind): void {
                 $exists->selectRaw('1')
                     ->from($grants)
-                    ->whereColumn(new KeyAsText($grants . '.' . $kind->column()), $usage . '.grant_id')
+                    ->whereColumn(new KeyAsText($grants . '.' . $kind->column(), uuid: true), $usage . '.grant_id')
                     ->whereColumn($grants . '.authorizable_type', $usage . '.authorizable_type')
                     ->whereColumn($grants . '.authorizable_id', $usage . '.authorizable_id');
 
