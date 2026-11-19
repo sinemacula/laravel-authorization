@@ -242,13 +242,14 @@ working: each forwards to the matching service method, with the `actor` it is gi
 - **An inline policy created is not attached.** The caller attaches it to its grantee, in the scope it should hold in,
   with `attachPolicy()`.
 - **Without the service provider** the traits refuse to write (`LogicException`) rather than lose the write.
-- **List methods are reads** and run outside a transaction. Each takes the actor as the writes do. `PolicyService`'s
-  `list()` and `listInline()` decide `authorization:policy.read` as the actor, on no resource, in the scope in place
-  (`ActingContext::authorizeAction()`), and refuse as `authorize()` does; the role and permission `list()` decide
-  nothing with it. `PolicyService::list()` shows the managed policies visible from the current tenant, the platform's,
-  the tenant's own and its ancestors', as the role and permission lists do, filtering by the tenant chain itself, since
-  the policy model carries no tenant scope; `listInline()` shows one grantee's inline policies. The other reads,
-  `find()` and `RoleExclusionService`'s `pairs()`, `conflicts()` and `conflictsForAll()`, take none.
+- **List methods are reads** and run outside a transaction. Each takes the actor as the writes do and, given one,
+  decides its read right as the actor, on no resource, in the scope in place (`ActingContext::authorizeAction()`), and
+  refuses as `authorize()` does: `RoleService::list()` decides `authorization:role.read`, `PermissionService::list()`
+  `authorization:permission.read`, and `PolicyService`'s `list()` and `listInline()` `authorization:policy.read`.
+  `PolicyService::list()` shows the managed policies visible from the current tenant, the platform's, the tenant's own
+  and its ancestors', as the role and permission lists do, filtering by the tenant chain itself, since the policy model
+  carries no tenant scope; `listInline()` shows one grantee's inline policies. The other reads, `find()` and
+  `RoleExclusionService`'s `pairs()`, `conflicts()` and `conflictsForAll()`, take none.
 - **`authorization:grant` gives no expiry**, so granting a role the grantee holds on a temporary or expired grant makes
   it permanent and is reported as granted; only a role already held with no expiry is reported as held.
 - **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission

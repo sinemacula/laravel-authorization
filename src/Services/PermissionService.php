@@ -48,17 +48,18 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * Creating, describing and deleting a permission widen no one; renaming one
  * re-grants it to every holder under the new name, so each holder must be one
  * the actor administers and the actor must be able to hand out the new name
- * (see `DefinitionConstraints`). A read is not decided yet. Every event a write
- * dispatches carries the operation, with the actor, its mode and the action,
- * once the write commits; the actor is never read from the authenticated user.
+ * (see `DefinitionConstraints`). `list()` with an acting context is decided as
+ * the actor under `authorization:permission.read`, on no resource, in the scope
+ * in place, before anything is read (see `ActingContext::authorizeAction()`).
+ * Every event a write dispatches carries the operation, with the actor, its
+ * mode and the action, once the write commits; the actor is never read from the
+ * authenticated user.
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before it reads or writes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @SuppressWarnings("php:S1172")
  */
 final class PermissionService
 {
@@ -177,10 +178,15 @@ final class PermissionService
      * @param  string|null  $guard
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function list(?string $guard = null, ?ActingContext $actor = null): Collection
     {
         PackageState::guardCurrent();
+
+        $actor?->authorizeAction(PackagePermissions::PERMISSION_READ);
 
         // @phpstan-ignore staticMethod.dynamicCall
         return self::permissionClass()::query()
