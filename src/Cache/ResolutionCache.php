@@ -64,6 +64,9 @@ final readonly class ResolutionCache
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionTiers Reads and keeps each entry across both tiers. */
     private ResolutionTiers $tiers;
 
+    /** @var \SplObjectStorage<object, null> The grantees with no key, held so no other object takes the hash their memo entries are keyed by. */
+    private \SplObjectStorage $keyless;
+
     /**
      * Create a new cache instance.
      *
@@ -90,9 +93,10 @@ final readonly class ResolutionCache
         /** The request's break-glass state and instances read as an identity; null keeps every entry as break-glass disabled. */
         private ?BreakGlassActivations $activations = null,
     ) {
-        $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
-        $this->store = $store === null ? null : new VersionedStore($store, $prefix);
-        $this->tiers = new ResolutionTiers($this->memo, $this->store, $prefix, $ttl, $isTrackingUsage, $activations->isEnabled ?? false);
+        $this->memo    = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
+        $this->store   = $store === null ? null : new VersionedStore($store, $prefix);
+        $this->tiers   = new ResolutionTiers($this->memo, $this->store, $prefix, $ttl, $isTrackingUsage, $activations->isEnabled ?? false);
+        $this->keyless = new \SplObjectStorage;
     }
 
     /**
@@ -582,14 +586,23 @@ final readonly class ResolutionCache
         $kind    = $this->activations?->kindOf($kind, $grantee) ?? $kind;
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
+        // A grantee with no key is known by an object hash, which another
+        // object takes once it is gone, so it is held for as long as the memo
+        // may serve it, and never reaches the store.
+        $isKeyless = PrincipalCacheKey::isKeyless($grantee);
+
+        if ($isKeyless) {
+            $this->keyless[$grantee] = null;
+        }
+
         /** @var list<mixed>|null $memoised */
-        $memoised = $this->memo->get($memoKey) ?? $this->tiers->read($memoKey, $this->tiers->key($kind, $grantee), $decode);
+        $memoised = $this->memo->get($memoKey) ?? ($isKeyless ? null : $this->tiers->read($memoKey, $this->tiers->key($kind, $grantee), $decode));
 
         if ($memoised !== null) {
             return $memoised;
         }
 
-        $pins = new ResolutionPins($this->store, ResolutionCodec::isRouted($kind));
+        $pins = new ResolutionPins($isKeyless ? null : $this->store, ResolutionCodec::isRouted($kind));
 
         if ($isGrantee) {
             $pins->grantee($grantee);

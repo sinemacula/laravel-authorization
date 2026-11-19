@@ -20,7 +20,9 @@ back while the versions it recorded hold. A hit costs two reads of the store, th
 and no query, and is memoised for the rest of its life. Any Laravel store works, with or without tags. An entry is
 written only when every version it depends on could be pinned before it was read, the records stayed the same while it
 was resolved and the tenant's ancestors did not move; otherwise it is kept in the memo alone. One a write invalidated
-while it was resolved is stored with a version that no longer holds, so it is never served.
+while it was resolved is stored with a version that no longer holds, so it is never served. A grantee with no key, whose
+`getKey()` is missing or returns neither an integer nor a non-empty string, is known by its object hash, so its entries
+are kept in the memo alone, and it is held until the request or job ends so no other object takes the hash.
 
 Every entry, in either tier, lives at most `ttl` seconds, and lapses a second before the nearest expiry of a grant it
 counts, so a temporal grant stops counting at its expiry in a long request as well. An entry that has already lapsed is

@@ -60,6 +60,20 @@ final class PrincipalCacheKey
     }
 
     /**
+     * Determine whether the principal exposes no usable key, so it is keyed by
+     * an object hash that PHP gives another object once it is gone.
+     *
+     * @param  object  $principal
+     * @return bool
+     */
+    public static function isKeyless(object $principal): bool
+    {
+        $key = \method_exists($principal, 'getKey') ? $principal->getKey() : null;
+
+        return !\is_int($key) && (!\is_string($key) || $key === '');
+    }
+
+    /**
      * Derive the principal key in `type:id` form.
      *
      * @param  object  $principal

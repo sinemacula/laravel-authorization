@@ -86,11 +86,11 @@ final readonly class ResolutionTiers
 
     /**
      * Keep what a resolution found as the entry of the kind for the grantee, in
-     * the memo, and in the store when nothing it read changed as it ran, for no
-     * longer than the configured maximum, or a second before the nearest expiry
-     * of a grant it counts, and return it. Given the writes of a bulk read, the
-     * entry is added to them, under its lifetime, to be written with the rest
-     * at once, rather than written now.
+     * the memo, and in the store when the grantee has a key and nothing it read
+     * changed as it ran, for no longer than the configured maximum, or a second
+     * before the nearest expiry of a grant it counts, and return it. Given the
+     * writes of a bulk read, the entry is added to them, under its lifetime, to
+     * be written with the rest at once, rather than written now.
      *
      * @template TValue
      *
@@ -120,6 +120,10 @@ final readonly class ResolutionTiers
         $this->keepActivations($memoKey, $resolution->activations);
 
         if ($this->store === null || !$resolution->stable || !$held || !$pins->isComplete()) {
+            return $resolution->value;
+        }
+
+        if (PrincipalCacheKey::isKeyless($grantee)) {
             return $resolution->value;
         }
 
