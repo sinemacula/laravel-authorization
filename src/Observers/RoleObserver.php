@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -171,6 +172,7 @@ final class RoleObserver
      * reported as detached. The role is a grantee of its policies, a morph with
      * no foreign key, so the delete does not take those rows with it. With no
      * grant service bound, the delete throws rather than leaving them silently.
+     * A soft delete keeps them, so a restored role has its policies again.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -180,9 +182,11 @@ final class RoleObserver
      */
     public function deleted(Role $role): void
     {
-        $grants = GrantService::instance() ?? throw new \LogicException('The authorization grant service is not bound; register the package\'s service provider.');
+        if (InlinePolicies::isDeletedForGood($role)) {
+            $grants = GrantService::instance() ?? throw new \LogicException('The authorization grant service is not bound; register the package\'s service provider.');
 
-        $grants->revokeAll(Reference::of($role));
+            $grants->revokeAll(Reference::of($role));
+        }
 
         /** @var array{grantees?: list<\SineMacula\Laravel\Authorization\Support\Reference>, permissions?: list<\SineMacula\Laravel\Authorization\Support\Reference>} $held */
         $held = RecordChanges::release($role);

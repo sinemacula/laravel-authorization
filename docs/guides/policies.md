@@ -149,6 +149,8 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 - A NUL byte is refused in a `starts_with`, `ends_with`, `like` or time operand and in a resource pattern, and a
   context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${...}` value holding one leaves
   a resource pattern unresolved.
+- A `like` context value or operand of `PHP_MAXPATHLEN` bytes or more (1024 on macOS, 4096 on Linux) is undecidable,
+  since `fnmatch()` cannot test it, so a deny on a long `input.*` value applies.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${...}` interpolation; list operands
@@ -199,7 +201,7 @@ Attaching or detaching a role's policy, or changing its expiry, dispatches the s
 `Grantee\PolicyDetached` and `Grantee\PolicyExpiryChanged` events, with the role as the grantee, and takes effect on
 the next check for every holder: a change to any role's policy attachments refreshes every grantee's cached policies,
 and moving a role in the hierarchy refreshes those of the grantees that reach it. Deleting a role detaches its
-policies, each reported as detached.
+policies, each reported as detached; a soft-deleted role keeps them until it is force-deleted.
 
 An inline policy belongs to one grantee, a principal, an identity or a role. It is attached to that grantee alone and is
 deleted with it. Create one through the grantee or `PolicyService::createInline()`, which check its document as any
@@ -241,6 +243,18 @@ policy (`SystemInlinePolicyException`). Deleting the grantee deletes its inline 
 grantee deleted without its model events, such as by a raw query, leaves them behind until `authorization:prune`
 deletes them, once it has revoked the grantee's grants. `authorization:policy:validate --database` checks inline
 policies with the rest.
+
+`PolicyService::list()` lists the managed policies visible from the current tenant, by name: the platform's, the
+tenant's own and its ancestors', never another tenant's, and outside any tenant the platform's alone. Inline policies
+are left out of it; `listInline()` lists one grantee's, named by its model or a `Reference`. Given an acting context,
+either is refused unless the actor is allowed `authorization:policy.read` in the scope in place:
+
+```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+
+$policies = app(PolicyService::class)->list(ActingContext::current());
+$editors  = app(PolicyService::class)->listInline($editor, ActingContext::current());
+```
 
 A check gathers its policies from four places: the bound policy store (`policy_store`, for policies shipped in code or
 kept elsewhere), the subject's own attachments, managed and inline, its roles' policies, and the policies attached to

@@ -614,7 +614,8 @@ final class AuthorizationManager
      * under another parent, or was deleted.
      *
      * Every resolution built in the tenant or below it is dropped, in every
-     * worker, and the current tenant's ancestors are read afresh, so a moved
+     * worker, and the ancestors held, the request's and any `within()`'s, and
+     * the roles an instance read for `hasRole()` are read afresh, so a moved
      * tenant never keeps grants inherited from its old ancestors. A delegated
      * administration call running meanwhile is tried again rather than written
      * on the chains its decisions read (see `OperationScope::treeChanged()`). A
@@ -631,7 +632,7 @@ final class AuthorizationManager
 
         ResolutionCache::instance()?->treeChanged($reference);
 
-        (new TenantScope)->flushResolvedTenant();
+        TenantScope::treeChanged();
 
         OperationScope::treeChanged();
     }
