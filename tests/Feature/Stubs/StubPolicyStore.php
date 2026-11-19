@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 /**
  * Stub `PolicyStore` implementation used to verify that a bound store is
  * resolved through the singleton container after the service provider wires it
- * up.
+ * up, and that a store's answer is read on every check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,9 +20,11 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
  */
 final class StubPolicyStore implements PolicyStore
 {
+    /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> The policies returned for every principal. */
+    public array $policies = [];
+
     /**
-     * Return an empty policy list — the stub exists only to verify the binding,
-     * not to drive evaluation.
+     * Return the policies the stub holds, none unless a test sets them.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -30,6 +32,6 @@ final class StubPolicyStore implements PolicyStore
     #[\Override]
     public function policiesFor(object $principal): array
     {
-        return [];
+        return $this->policies;
     }
 }

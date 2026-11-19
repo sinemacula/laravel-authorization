@@ -9,9 +9,15 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\DeclaresPermissions;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -38,6 +44,8 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class SpatieMigrationTest extends TestCase
 {
+    use ActsAsTenant, DeclaresPermissions;
+
     /** Name of the Artisan command under test. */
     private const string MIGRATION_COMMAND = 'authorization:migrate-spatie';
 
@@ -234,6 +242,49 @@ final class SpatieMigrationTest extends TestCase
         self::assertSame(0, DB::table('auth_role_permissions')->count());
         self::assertSame(0, DB::table('auth_authorizable_roles')->count());
         self::assertSame(0, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * A grantee imported with a role and a team's permission is allowed what it
+     * held through `hasRole()`, `hasPermission()`, `can()` and the Gate, and
+     * the team's permission in that team's tenant alone.
+     *
+     * @return void
+     */
+    public function testImportedGranteesAreAllowedWhatTheyHeld(): void
+    {
+        $user = NumberedGrantee::query()->create();
+        $team = StubTenant::query()->create(['id' => '5', 'name' => 'Team 5']);
+
+        Schema::table('model_has_permissions', static function (Blueprint $table): void {
+            $table->unsignedBigInteger('team_id')->nullable();
+        });
+
+        DB::table('model_has_roles')->insert(['role_id' => 1, 'model_type' => $user->getMorphClass(), 'model_id' => $user->getKey()]);
+        DB::table('model_has_permissions')->insert(['permission_id' => 2, 'model_type' => $user->getMorphClass(), 'model_id' => $user->getKey(), 'team_id' => 5]);
+
+        self::assertSame(0, Artisan::call(self::MIGRATION_COMMAND, ['--team-tenant-type' => $team->getMorphClass()]));
+
+        $this->declarePermissions('posts:create', 'posts:edit', 'posts:delete');
+        $this->actAsTenant(null);
+
+        self::assertTrue($user->hasRole('admin'));
+        self::assertTrue($user->hasPermission('posts:delete'));
+        self::assertTrue(Authorization::forUser($user)->can('posts:create'));
+        self::assertTrue(Gate::forUser($user)->allows('posts:create'));
+        self::assertFalse(Authorization::forUser($user)->can('posts:edit'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:edit'));
+
+        $this->actAsTenant($team);
+
+        self::assertTrue($user->hasPermission('posts:edit'));
+        self::assertTrue(Authorization::forUser($user)->can('posts:edit'));
+        self::assertTrue(Gate::forUser($user)->allows('posts:edit'));
+
+        $this->actAsTenant(StubTenant::query()->create(['id' => '6', 'name' => 'Team 6']));
+
+        self::assertFalse(Authorization::forUser($user)->can('posts:edit'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:edit'));
     }
 
     /**
