@@ -7,6 +7,7 @@ namespace Tests\Feature\Services;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Events\QueryExecuted;
@@ -83,6 +84,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\InterleavesWrites;
+use Tests\Concerns\RacesAnotherSession;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -117,12 +119,15 @@ use Tests\TestCase;
 final class GrantServiceTest extends TestCase
 {
     use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions,
-        CatchesRefusals, ComparesReferences, DeclaresPermissions, InterleavesWrites, RacesDelegatedCalls,
-        ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection,
-        WidensGrants;
+        CatchesRefusals, ComparesReferences, DeclaresPermissions, InterleavesWrites, RacesAnotherSession,
+        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, ReportsEveryDecision,
+        UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
+
+    /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
+    private const array RACED = ['testADuplicateCommittedByAnotherSessionIsUnchanged'];
 
     /** @var list<string> The rights revoking everything asks for beside the break-glass revoke right. */
     private const array REVOKE_ALL = [
@@ -276,6 +281,37 @@ final class GrantServiceTest extends TestCase
         self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantRole($user, 'editor'));
         self::assertSame(1, DB::table('authorizable_roles')->count());
         self::assertNoGrantEvents();
+    }
+
+    /**
+     * The same grant committed by another session after the call has read
+     * inside its transaction is read back as unchanged, leaving one row.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADuplicateCommittedByAnotherSessionIsUnchanged(): void
+    {
+        $this->raceOrSkip(['authorizable_roles', 'roles', 'stub_grantees'], static function (): void {
+            $user = self::user();
+            $role = self::role('editor');
+
+            Event::fake();
+
+            $outcome = self::afterFirstRead(
+                static fn (): GrantOutcome => self::service()->grantRole($user, 'editor'),
+                static fn (Connection $other): bool => $other->table('authorizable_roles')->insert([
+                    'role_id'           => $role->id,
+                    'authorizable_type' => $user->getMorphClass(),
+                    'authorizable_id'   => 'user-1',
+                ]),
+            );
+
+            self::assertSame(GrantOutcome::UNCHANGED, $outcome);
+            self::assertSame(1, DB::table('authorizable_roles')->count());
+            self::assertNoGrantEvents();
+        });
     }
 
     /**
@@ -4023,6 +4059,23 @@ final class GrantServiceTest extends TestCase
             'syncPolicies'     => static fn () => $service->syncPolicies($user, [$policy]),
             'revokeAll'        => static fn () => $service->revokeAll($user),
         ]);
+    }
+
+    /**
+     * Run the raced tests outside the test's transaction, where the second
+     * session sees their rows.
+     *
+     * @return array<int, string|null>
+     */
+    #[\Override]
+    protected function connectionsToTransact(): array
+    {
+        $isRaced = \in_array($this->name(), self::RACED, true) && DB::connection()->getDriverName() !== 'sqlite';
+
+        /** @var list<string|null> $connections */
+        $connections = parent::connectionsToTransact();
+
+        return $isRaced ? [] : $connections;
     }
 
     /**
