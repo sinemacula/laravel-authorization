@@ -85,7 +85,10 @@ final class RoleServiceTest extends TestCase
         RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection;
 
     /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
-    private const array RACED = ['testAParentCommittedMeanwhileThatClosesACycleIsRefused'];
+    private const array RACED = [
+        'testAParentCommittedMeanwhileThatClosesACycleIsRefused',
+        'testAPermissionCommittedByAnotherSessionIsUnchanged',
+    ];
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -1039,6 +1042,33 @@ final class RoleServiceTest extends TestCase
         self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($role, $permission));
         self::assertSame(1, DB::table('role_permissions')->count());
         Event::assertNotDispatched(PermissionGranted::class);
+    }
+
+    /**
+     * The same permission committed to the role by another session after the
+     * call has read inside its transaction is read back as unchanged.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionCommittedByAnotherSessionIsUnchanged(): void
+    {
+        $this->raceOrSkip(['role_permissions', 'permissions', 'roles'], static function (): void {
+            $role       = self::role('editor');
+            $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+            Event::fake([PermissionGranted::class]);
+
+            $outcome = self::afterFirstRead(
+                static fn (): GrantOutcome => self::service()->grantPermission($role, $permission),
+                static fn (Connection $other): bool => $other->table('role_permissions')->insert(['role_id' => $role->id, 'permission_id' => $permission->id]),
+            );
+
+            self::assertSame(GrantOutcome::UNCHANGED, $outcome);
+            self::assertSame(1, DB::table('role_permissions')->count());
+            Event::assertNotDispatched(PermissionGranted::class);
+        });
     }
 
     /**
